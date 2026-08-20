@@ -12,7 +12,8 @@ Built as a portfolio project to apply valuation work from my investment internsh
 4. Discounts those cash flows to a present value using a chosen WACC, with a Gordon Growth terminal value
 5. Bridges Enterprise Value → Equity Value → implied share price
 6. Runs a WACC / terminal growth sensitivity grid
-7. Exports a 4-tab Excel workbook: Summary, DCF Forecast, Sensitivity, and Scenario Comparison
+7. Pulls independent analyst price targets, recommendation trends, and recent rating actions (free, no API key)
+8. Exports a multi-sheet Excel workbook: Cover, Summary, Analyst Insights, AI Valuation Summary (optional), DCF Forecast, Sensitivity, and Scenario Comparison
 
 ## Example output: Microsoft (MSFT)
 
@@ -47,7 +48,7 @@ source venv/bin/activate   # Windows: venv\Scripts\activate
 pip install -r requirements.txt
 ```
 
-**API key requirement — read this before running Step 6.** Steps 1-5 (data pull, DCF engine, sensitivity table, Excel export) require **no API key at all** and are free to run. Step 6 (the AI-generated explanation of the DCF-vs-market-price gap) calls the Anthropic API and requires **your own** Anthropic API key, set as an environment variable:
+**API key requirement — read this before running with `--with-ai`.** Steps 1-5, the base Excel export, and the Analyst Insights data all require **no API key at all** and are free to run. Only the AI Valuation Summary sheet (`--with-ai` flag, or running `step6_ai_summary.py` directly) calls the Anthropic API and requires **your own** Anthropic API key, set as an environment variable:
 
 ```bash
 export ANTHROPIC_API_KEY="your-key-here"   # Windows PowerShell: $env:ANTHROPIC_API_KEY="your-key-here"
@@ -70,8 +71,11 @@ python3 step3_dcf_engine.py --ticker MSFT --wacc 0.07 --terminal-growth 0.02
 # WACC / terminal growth sensitivity table
 python3 step4_sensitivity.py --ticker MSFT
 
-# Generate the full Excel workbook (Summary, Forecast, Sensitivity, Scenarios) - no API key needed
+# Generate the full Excel workbook (Summary, Analyst Insights, Forecast, Sensitivity, Scenarios) - no API key needed
 python3 step5_excel_export.py --ticker MSFT --wacc 0.09
+
+# Same, but also include the AI Valuation Summary sheet - REQUIRES your own ANTHROPIC_API_KEY
+python3 step5_excel_export.py --ticker MSFT --wacc 0.09 --with-ai
 
 # AI-generated explanation of the implied-vs-market price gap - REQUIRES your own ANTHROPIC_API_KEY
 python3 step6_ai_summary.py --ticker MSFT
@@ -84,8 +88,9 @@ step1_test_setup.py       # Environment/connection test
 step2_get_financials.py   # Pull & clean financial statements
 step3_dcf_engine.py       # Core DCF: assumptions, forecast, discounting, valuation
 step4_sensitivity.py      # WACC / terminal growth sensitivity grid
-step5_excel_export.py     # Formatted Excel workbook export (no API key needed)
+step5_excel_export.py     # Formatted Excel workbook export (no API key needed; --with-ai adds the AI sheet)
 step6_ai_summary.py       # AI-generated explanation of valuation gaps (requires ANTHROPIC_API_KEY)
+analyst_data.py           # Free analyst price targets, recommendations, rating actions (no API key)
 inspect_fields.py         # Diagnostic tool: lists a ticker's actual yfinance field names
 ```
 
