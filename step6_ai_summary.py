@@ -58,27 +58,69 @@ def gather_context(ticker: str, df, assumptions: dict, result: dict,
     return context
 
 
-def build_prompt(context: dict) -> str:
+def compute_valuation_rating(gap_pct: float) -> dict:
+    """A deterministic, rule-based rating derived directly from the DCF's
+    own output - NOT generated or judged by the LLM. This mirrors how
+    professional research (e.g. Morningstar's star rating) works: the
+    rating is a transparent function of Price/Fair Value, and analyst
+    commentary explains it rather than replaces it. Keeping this rule-based
+    means the rating is fully auditable and never subject to LLM
+    hallucination or inconsistency between runs."""
+    if gap_pct > 0.30:
+        return {"stars": 5, "label": "Strongly Undervalued (model)"}
+    elif gap_pct > 0.10:
+        return {"stars": 4, "label": "Undervalued (model)"}
+    elif gap_pct > -0.10:
+        return {"stars": 3, "label": "Fairly Valued (model)"}
+    elif gap_pct > -0.30:
+        return {"stars": 2, "label": "Overvalued (model)"}
+    else:
+        return {"stars": 1, "label": "Strongly Overvalued (model)"}
+
+
+def build_prompt(context: dict, rating: dict) -> str:
     return f"""You are a financial analyst assistant. You have been given
 the output of a DCF (discounted cash flow) valuation model for {context['ticker']},
-along with some market context. Explain, in 3-4 sentences of plain English,
-the most likely reason(s) for the gap between the model's implied share price
-and the actual market price.
+along with some market context and a rule-based valuation rating that has
+ALREADY been computed (you are not generating this rating - explain it).
+
+Write a 5-7 sentence plain-English explanation covering:
+1. State the rating ({rating['stars']}/5 stars, "{rating['label']}") and what it means in one sentence.
+2. Explain the most likely reason(s) for the gap between the model's implied
+   share price and the actual market price.
+3. Close with one sentence putting this in context for the reader (e.g. what
+   would need to be true for the model's view vs. the market's view to be right).
 
 CRITICAL RULES:
 - Only reason from the numbers provided below. Do not invent company news,
   events, or explanations not supported by this data.
+- You are given THREE candidate drivers of the gap: (1) revenue growth
+  assumption, (2) WACC/discount rate, (3) capex assumption. Explicitly
+  consider all three before writing your explanation - do not default to
+  whichever one has the most readily available narrative (e.g. analyst
+  growth estimates) if the magnitude of that factor's plausible impact is
+  small relative to the others. Use the historical capex range and the
+  size of each percentage gap to judge which factor(s) most plausibly
+  explain a gap of this magnitude, and say so explicitly - e.g. if the
+  growth assumption gap is only 1-2 percentage points, that alone is
+  unlikely to explain a 40%+ price gap, and you should say the WACC or
+  capex assumption is the more likely primary driver instead.
 - If the data does not clearly explain the gap, say so explicitly rather
   than guessing.
 - Do not state or imply the model is "wrong" or the market is "wrong" -
   explain the gap as a difference in assumptions/perspective, not an error.
-- Do not generate or suggest specific new numeric assumptions - your role
-  is to explain, not to recalculate.
+- Do not generate or suggest specific new numeric assumptions, and do not
+  issue your own independent buy/hold/sell recommendation beyond restating
+  the rule-based rating already provided - your role is to explain, not to
+  recalculate or advise.
+- End with a one-line disclaimer: this is a model output based on specific
+  assumptions, not investment advice.
 
 DATA:
 - Implied share price (DCF, historical-median-based assumptions): ${context['implied_share_price']:.2f}
 - Current market price: ${context['current_market_price']:.2f}
 - Gap: {context['gap_pct']:+.1%}
+- Rule-based rating: {rating['stars']}/5 stars ({rating['label']})
 - WACC (discount rate) used in this run: {context['wacc_used']:.1%}
 - Terminal growth rate used: {context['terminal_growth_used']:.1%}
 - Historical median revenue growth used in the model: {context['historical_median_growth']:.1%}
@@ -94,18 +136,22 @@ Write the explanation now, as plain prose (no headers, no bullet points)."""
 
 def generate_gap_explanation(ticker: str, df, assumptions: dict, result: dict,
                                current_price: float, stock_info: dict,
-                               wacc: float, terminal_growth: float) -> str:
+                               wacc: float, terminal_growth: float) -> dict:
     context = gather_context(ticker, df, assumptions, result, current_price,
                               stock_info, wacc, terminal_growth)
-    prompt = build_prompt(context)
+    rating = compute_valuation_rating(context["gap_pct"])
+    prompt = build_prompt(context, rating)
 
     client = Anthropic()  # reads ANTHROPIC_API_KEY from environment
     response = client.messages.create(
         model="claude-sonnet-4-5",
-        max_tokens=300,
+        max_tokens=500,
         messages=[{"role": "user", "content": prompt}],
     )
-    return response.content[0].text.strip()
+    return {
+        "rating": rating,
+        "explanation": response.content[0].text.strip(),
+    }
 
 
 if __name__ == "__main__":
@@ -142,8 +188,12 @@ if __name__ == "__main__":
     print(f"Implied price: ${result['implied_share_price']:.2f} | Market price: ${current_price:.2f}\n")
     print("Generating AI explanation...\n")
 
-    explanation = generate_gap_explanation(args.ticker, df, assumptions, result,
-                                             current_price, stock_info,
-                                             args.wacc, args.terminal_growth)
-    print("--- AI Explanation ---")
-    print(explanation)
+    output = generate_gap_explanation(args.ticker, df, assumptions, result,
+                                        current_price, stock_info,
+                                        args.wacc, args.terminal_growth)
+    rating = output["rating"]
+    stars_display = "\u2605" * rating["stars"] + "\u2606" * (5 - rating["stars"])
+    print(f"--- Valuation Rating (rule-based, from gap %) ---")
+    print(f"{stars_display}  {rating['label']}")
+    print(f"\n--- AI Explanation ---")
+    print(output["explanation"])
