@@ -136,7 +136,7 @@ def build_cover_sheet(ws, ticker: str, company_name: str):
     for c in range(1, 9):
         ws.cell(row=r, column=c).fill = SECTION_FILL
     r += 1
-    for label in ["Summary", "AI Valuation Summary", "DCF Forecast",
+    for label in ["Summary", "Analyst Insights", "AI Valuation Summary", "DCF Forecast",
                   "Sensitivity", "Scenarios"]:
         ws.cell(row=r, column=1, value=f"\u2022  {label}").font = BODY_FONT
         r += 1
@@ -334,11 +334,97 @@ def build_scenario_sheet(ws, ticker, company_name, scenarios: list):
 
 
 # ---------------------------------------------------------------
+# Analyst Insights sheet
+# ---------------------------------------------------------------
+def build_analyst_sheet(ws, ticker, company_name, analyst_data: dict):
+    _draw_banner(ws, f"{ticker} \u2014 Analyst Insights", company_name)
+
+    r = 4
+    ws.cell(row=r, column=1, value="Analyst Price Targets").font = SECTION_FONT
+    for c in range(1, 6):
+        ws.cell(row=r, column=c).fill = SECTION_FILL
+    r += 1
+
+    targets = analyst_data.get("price_targets")
+    if targets:
+        labels = [("Low", "low"), ("Mean", "mean"), ("Current", "current"), ("High", "high")]
+        for label, key in labels:
+            value = targets.get(key)
+            ws.cell(row=r, column=1, value=label).font = LABEL_FONT
+            if value is not None:
+                vcell = ws.cell(row=r, column=2, value=value)
+                vcell.number_format = "$#,##0.00"
+                vcell.font = BODY_FONT
+            r += 1
+    else:
+        ws.cell(row=r, column=1, value="Not available for this ticker").font = DISCLAIMER_FONT
+        r += 1
+    r += 1
+
+    ws.cell(row=r, column=1, value="Analyst Recommendations (most recent period)").font = SECTION_FONT
+    for c in range(1, 6):
+        ws.cell(row=r, column=c).fill = SECTION_FILL
+    r += 1
+
+    recs = analyst_data.get("recommendations")
+    if recs is not None and len(recs) > 0:
+        latest = recs.iloc[0]
+        headers = ["Strong Buy", "Buy", "Hold", "Sell", "Strong Sell"]
+        cols = ["strongBuy", "buy", "hold", "sell", "strongSell"]
+        for col_num, header in enumerate(headers, start=1):
+            ws.cell(row=r, column=col_num, value=header)
+        _style_header_row(ws, r, len(headers))
+        r += 1
+        for col_num, key in enumerate(cols, start=1):
+            cell = ws.cell(row=r, column=col_num, value=int(latest.get(key, 0)))
+            cell.font = BODY_FONT
+            cell.alignment = Alignment(horizontal="center")
+            cell.border = THIN_BORDER
+        r += 2
+    else:
+        ws.cell(row=r, column=1, value="Not available for this ticker").font = DISCLAIMER_FONT
+        r += 2
+
+    ws.cell(row=r, column=1, value="Latest Rating Actions").font = SECTION_FONT
+    for c in range(1, 6):
+        ws.cell(row=r, column=c).fill = SECTION_FILL
+    r += 1
+
+    ratings = analyst_data.get("latest_ratings")
+    if ratings is not None and len(ratings) > 0:
+        headers = ["Date", "Firm", "From", "To", "Action"]
+        for col_num, header in enumerate(headers, start=1):
+            ws.cell(row=r, column=col_num, value=header)
+        _style_header_row(ws, r, len(headers))
+        r += 1
+        for idx, row in ratings.iterrows():
+            ws.cell(row=r, column=1, value=str(idx.date()) if hasattr(idx, "date") else str(idx)).font = BODY_FONT
+            ws.cell(row=r, column=2, value=row.get("Firm", "")).font = BODY_FONT
+            ws.cell(row=r, column=3, value=row.get("FromGrade", "")).font = BODY_FONT
+            ws.cell(row=r, column=4, value=row.get("ToGrade", "")).font = BODY_FONT
+            ws.cell(row=r, column=5, value=row.get("Action", "")).font = BODY_FONT
+            for c in range(1, 6):
+                ws.cell(row=r, column=c).border = THIN_BORDER
+            r += 1
+    else:
+        ws.cell(row=r, column=1, value="Not available for this ticker").font = DISCLAIMER_FONT
+        r += 1
+    r += 1
+
+    r = _draw_wrapped_box(ws, r,
+        "Sourced from Yahoo Finance analyst coverage data via yfinance. Reflects third-party "
+        "sell-side analyst opinions, not this tool's own DCF output, and not investment advice.",
+        fill=AMBER_FILL_STYLE, border=GOLD_BORDER, font=DISCLAIMER_FONT, chars_per_line=95)
+
+    _autofit_columns(ws)
+
+
+# ---------------------------------------------------------------
 # Assemble workbook
 # ---------------------------------------------------------------
 def export_to_excel(ticker, company_name, current_price, result, assumptions, forecast_df,
                      sensitivity_df, cash, total_debt, shares_outstanding,
-                     scenarios=None, ai_output=None, gap_pct=None,
+                     scenarios=None, ai_output=None, gap_pct=None, analyst_info=None,
                      output_path="dcf_output.xlsx"):
     wb = Workbook()
 
@@ -349,6 +435,10 @@ def export_to_excel(ticker, company_name, current_price, result, assumptions, fo
     summary_ws = wb.create_sheet("Summary")
     build_summary_sheet(summary_ws, ticker, company_name, current_price, result,
                          assumptions, cash, total_debt, shares_outstanding)
+
+    if analyst_info is not None:
+        analyst_ws = wb.create_sheet("Analyst Insights")
+        build_analyst_sheet(analyst_ws, ticker, company_name, analyst_info)
 
     if ai_output is not None:
         ai_ws = wb.create_sheet("AI Valuation Summary")
@@ -453,7 +543,12 @@ if __name__ == "__main__":
                 args.wacc, args.terminal_growth,
             )
 
+    from analyst_data import get_analyst_data
+    print("Pulling analyst insights (free, no API key needed)...")
+    analyst_info = get_analyst_data(ticker)
+
     export_to_excel(ticker, company_name, current_price, result, assumptions, forecast_df,
                      sensitivity_df, cash, total_debt, shares_outstanding,
                      scenarios=scenarios, ai_output=ai_output, gap_pct=gap_pct,
+                     analyst_info=analyst_info,
                      output_path=f"{ticker}_dcf_output.xlsx")
