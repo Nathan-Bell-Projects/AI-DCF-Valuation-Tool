@@ -37,7 +37,7 @@ Built as a portfolio project to apply valuation work from my investment internsh
 
 ## Tech stack
 
-`Python` · `yfinance` · `pandas` · `openpyxl` · (Claude API integration planned)
+`Python` · `yfinance` · `pandas` · `openpyxl` · `Anthropic Claude API`
 
 ## Setup
 
