@@ -49,19 +49,25 @@ def build_sensitivity_table(forecast_df: pd.DataFrame, cash: float,
 
 
 if __name__ == "__main__":
+    import argparse
     import yfinance as yf
 
-    ticker = "MSFT"
-    df = get_dcf_inputs(ticker)
-    assumptions = get_historical_assumptions(
-        df, overrides={"avg_capex_pct_revenue": 0.15}
-    )
+    parser = argparse.ArgumentParser(description="Build a WACC/terminal growth sensitivity table.")
+    parser.add_argument("--ticker", default="MSFT", help="Stock ticker, e.g. MSFT")
+    parser.add_argument("--capex-override", type=float, default=None, dest="capex_override",
+                         help="Manually set capex as %% of revenue, overriding the historical median.")
+    args = parser.parse_args()
+
+    df = get_dcf_inputs(args.ticker)
+
+    overrides = {"avg_capex_pct_revenue": args.capex_override} if args.capex_override is not None else None
+    assumptions = get_historical_assumptions(df, overrides=overrides)
     forecast_df = forecast_free_cash_flow(assumptions)
 
     latest_year = assumptions["latest_year"]
     cash = df.loc["Cash", latest_year]
     total_debt = df.loc["Total Debt", latest_year]
-    shares_outstanding = yf.Ticker(ticker).info.get("sharesOutstanding")
+    shares_outstanding = yf.Ticker(args.ticker).info.get("sharesOutstanding")
 
     # A reasonable range around your base-case assumptions
     wacc_range = [0.07, 0.08, 0.09, 0.10, 0.11]
@@ -72,5 +78,5 @@ if __name__ == "__main__":
         wacc_range, growth_range,
     )
 
-    print(f"Sensitivity Table - Implied Share Price ({ticker})")
+    print(f"Sensitivity Table - Implied Share Price ({args.ticker})")
     print(sensitivity.round(2))

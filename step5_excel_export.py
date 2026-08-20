@@ -182,15 +182,26 @@ def export_to_excel(ticker, current_price, result, assumptions, forecast_df,
 
 
 if __name__ == "__main__":
+    import argparse
     import yfinance as yf
     from step3_dcf_engine import get_dcf_inputs, get_historical_assumptions, forecast_free_cash_flow, calculate_dcf_valuation
     from step4_sensitivity import build_sensitivity_table
 
-    ticker = "MSFT"
+    parser = argparse.ArgumentParser(description="Export a full DCF analysis to Excel.")
+    parser.add_argument("--ticker", default="MSFT", help="Stock ticker, e.g. MSFT")
+    parser.add_argument("--wacc", type=float, default=0.09, help="Base case discount rate")
+    parser.add_argument("--terminal-growth", type=float, default=0.025, dest="terminal_growth",
+                         help="Base case terminal growth rate")
+    parser.add_argument("--capex-override", type=float, default=None, dest="capex_override",
+                         help="Optional: manually set capex as %% of revenue for an alternate scenario "
+                              "(e.g. treating an anomalous historical year as non-recurring).")
+    args = parser.parse_args()
+
+    ticker = args.ticker
     df = get_dcf_inputs(ticker)
 
-    # OFFICIAL BASE CASE: unadjusted historical median assumptions.
-    # This is the defensible number - not tuned to match the market price.
+    # OFFICIAL BASE CASE: unadjusted historical median assumptions, at the
+    # WACC/terminal growth the user specified (or the defaults).
     assumptions = get_historical_assumptions(df)
     forecast_df = forecast_free_cash_flow(assumptions)
 
@@ -202,7 +213,7 @@ if __name__ == "__main__":
     current_price = stock_info.get("currentPrice")
 
     result = calculate_dcf_valuation(
-        forecast_df, wacc=0.09, terminal_growth=0.025,
+        forecast_df, wacc=args.wacc, terminal_growth=args.terminal_growth,
         cash=cash, total_debt=total_debt, shares_outstanding=shares_outstanding,
     )
 
@@ -212,29 +223,39 @@ if __name__ == "__main__":
         growth_range=[0.015, 0.02, 0.025, 0.03, 0.035],
     )
 
-    # Build the scenario comparison: base case vs. named judgment-call adjustments
-    scenarios = []
-    scenario_defs = [
-        ("Base case", None, 0.09, 0.025),
-        ("Lower capex assumption (AI spend treated as temporary)", 0.15, 0.09, 0.025),
-        ("Lower WACC / higher growth (market-implied)", None, 0.07, 0.02),
-        ("Combined: lower capex + market-implied WACC/growth", 0.15, 0.07, 0.02),
-    ]
-    for label, capex_ov, wacc, growth in scenario_defs:
-        sc_overrides = {"avg_capex_pct_revenue": capex_ov} if capex_ov else None
+    # Build a GENERIC scenario comparison - not tied to any one company's
+    # story. Always includes WACC +/- 2 percentage points (illustrates
+    # terminal-value sensitivity, which matters for every company). Only
+    # includes a capex-override scenario if the user actually asked for one
+    # via --capex-override, since assuming "this company has an anomalous
+    # capex year" isn't true for every ticker (e.g. it was true for MSFT's
+    # AI buildout, but there's no reason to assume it for PG or CAT).
+    def run_scenario(label, wacc, terminal_growth, capex_override=None):
+        sc_overrides = {"avg_capex_pct_revenue": capex_override} if capex_override is not None else None
         sc_assumptions = get_historical_assumptions(df, overrides=sc_overrides)
         sc_forecast = forecast_free_cash_flow(sc_assumptions)
         sc_result = calculate_dcf_valuation(
-            sc_forecast, wacc=wacc, terminal_growth=growth,
+            sc_forecast, wacc=wacc, terminal_growth=terminal_growth,
             cash=cash, total_debt=total_debt, shares_outstanding=shares_outstanding,
         )
-        scenarios.append({
+        return {
             "label": label,
-            "capex_label": f"{capex_ov:.0%}" if capex_ov else "Historical median",
+            "capex_label": f"{capex_override:.0%}" if capex_override is not None else "Historical median",
             "wacc": wacc,
-            "terminal_growth": growth,
+            "terminal_growth": terminal_growth,
             "implied_price": sc_result["implied_share_price"],
-        })
+        }
+
+    scenarios = [
+        run_scenario("Base case", args.wacc, args.terminal_growth),
+        run_scenario(f"Lower WACC ({args.wacc - 0.02:.1%})", args.wacc - 0.02, args.terminal_growth),
+        run_scenario(f"Higher WACC ({args.wacc + 0.02:.1%})", args.wacc + 0.02, args.terminal_growth),
+    ]
+    if args.capex_override is not None:
+        scenarios.append(run_scenario(
+            f"Custom capex override ({args.capex_override:.0%} of revenue)",
+            args.wacc, args.terminal_growth, capex_override=args.capex_override,
+        ))
 
     export_to_excel(ticker, current_price, result, assumptions, forecast_df,
                      sensitivity_df, cash, total_debt, shares_outstanding,

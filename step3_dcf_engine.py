@@ -157,6 +157,19 @@ def calculate_dcf_valuation(forecast_df: pd.DataFrame, wacc: float,
 
     implied_share_price = equity_value / shares_outstanding
 
+    # Sanity guardrail: a negative implied share price isn't a code bug -
+    # it's the model telling you standard DCF likely doesn't fit this
+    # company's capital structure (e.g. REITs, whose capex/property
+    # purchases are typically funded by debt/equity issuance, not
+    # operating cash flow - the core assumption a DCF relies on).
+    if implied_share_price < 0:
+        print("  [!] WARNING: Negative implied share price. This usually means "
+              "capex/investment spending exceeds operating cash flow generation "
+              "- common for REITs and other capital-intensive businesses funded "
+              "by external financing. Standard DCF may not be the right "
+              "valuation method for this company; consider FFO/AFFO multiples "
+              "for REITs instead.")
+
     return {
         "pv_explicit_period": pv_explicit_period,
         "terminal_value": terminal_value,

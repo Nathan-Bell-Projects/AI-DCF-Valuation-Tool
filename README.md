@@ -47,6 +47,14 @@ source venv/bin/activate   # Windows: venv\Scripts\activate
 pip install -r requirements.txt
 ```
 
+**API key requirement — read this before running Step 6.** Steps 1-5 (data pull, DCF engine, sensitivity table, Excel export) require **no API key at all** and are free to run. Step 6 (the AI-generated explanation of the DCF-vs-market-price gap) calls the Anthropic API and requires **your own** Anthropic API key, set as an environment variable:
+
+```bash
+export ANTHROPIC_API_KEY="your-key-here"   # Windows PowerShell: $env:ANTHROPIC_API_KEY="your-key-here"
+```
+
+This project never embeds or transmits any API key belonging to the original author — each user runs Step 6 against their own Anthropic account and is billed only for their own usage (a handful of cents per run). Get a key at [console.anthropic.com](https://console.anthropic.com) (separate from a claude.ai subscription; a small prepaid credit purchase is required, $5 minimum).
+
 ## Usage
 
 ```bash
@@ -59,8 +67,14 @@ python3 step3_dcf_engine.py --ticker MSFT --capex-override 0.15
 # Custom WACC / terminal growth
 python3 step3_dcf_engine.py --ticker MSFT --wacc 0.07 --terminal-growth 0.02
 
-# Generate the full Excel workbook (Summary, Forecast, Sensitivity, Scenarios)
-python3 step5_excel_export.py
+# WACC / terminal growth sensitivity table
+python3 step4_sensitivity.py --ticker MSFT
+
+# Generate the full Excel workbook (Summary, Forecast, Sensitivity, Scenarios) - no API key needed
+python3 step5_excel_export.py --ticker MSFT --wacc 0.09
+
+# AI-generated explanation of the implied-vs-market price gap - REQUIRES your own ANTHROPIC_API_KEY
+python3 step6_ai_summary.py --ticker MSFT
 ```
 
 ## Project structure
@@ -70,11 +84,20 @@ step1_test_setup.py       # Environment/connection test
 step2_get_financials.py   # Pull & clean financial statements
 step3_dcf_engine.py       # Core DCF: assumptions, forecast, discounting, valuation
 step4_sensitivity.py      # WACC / terminal growth sensitivity grid
-step5_excel_export.py     # Formatted Excel workbook export
+step5_excel_export.py     # Formatted Excel workbook export (no API key needed)
+step6_ai_summary.py       # AI-generated explanation of valuation gaps (requires ANTHROPIC_API_KEY)
+inspect_fields.py         # Diagnostic tool: lists a ticker's actual yfinance field names
 ```
+
+## Tested on
+
+Beyond the primary MSFT walkthrough above, the pipeline has been run end-to-end on:
+- **O (Realty Income, REIT)** — surfaced and fixed a real crash bug (missing-field handling), added multi-sector field-name fallbacks, and added a guardrail that flags when a negative implied price signals a poor methodology fit (common for REITs) rather than a code error.
+- **PG (Procter & Gamble, mature/low-growth)** — confirmed the model handles low-growth, negative-NWC companies correctly; the WACC-vs-market-price sensitivity pattern held here too.
+- **CAT (Caterpillar, cyclical industrial)** — confirmed the "historical-median growth lags a fast-moving narrative" pattern generalizes beyond MSFT (CAT's AI-power-demand-driven re-rating shows the same dynamic as MSFT's AI capex story).
 
 ## Roadmap
 
-- [ ] AI-assisted assumption checking — flag anomalous historical inputs (e.g. the capex spike) automatically, and generate a plain-English summary of the valuation output. The AI layer will comment on numbers the DCF engine has already calculated; it will not generate the financial figures themselves.
-- [ ] Analyst consensus comparison — benchmark the model's derived growth assumption against Wall Street forward estimates (available via yfinance)
-- [ ] Tested against a broader, more varied set of companies beyond large-cap tech
+- [x] AI-assisted gap explanation — Step 6 takes the DCF output plus forward-looking analyst estimates and generates a plain-English explanation of why the implied price differs from the market price, grounded strictly in the model's own numbers (WACC, capex assumptions, growth assumptions vs. analyst forward estimates). It never generates or overrides the DCF's own figures.
+- [ ] Analyst consensus comparison surfaced directly in the Excel output (currently used only inside the Step 6 prompt)
+- [ ] Tested against a broader, more varied set of companies beyond the four covered so far
