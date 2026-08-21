@@ -64,6 +64,13 @@ def get_dcf_inputs(ticker: str) -> pd.DataFrame:
         # NWC = (Current Assets - Cash) - Current Liabilities
         "Current Assets": safe_get(balance_sheet, "Current Assets"),
         "Current Liabilities": safe_get(balance_sheet, "Current Liabilities"),
+        # Added for CAPM-based WACC: used to estimate pre-tax cost of debt
+        # (Interest Expense / Total Debt)
+        "Interest Expense": safe_get(income_stmt, [
+            "Interest Expense",
+            "Interest Expense Non Operating",
+            "Net Interest Income",
+        ]),
     }
 
     df = pd.DataFrame(data)
