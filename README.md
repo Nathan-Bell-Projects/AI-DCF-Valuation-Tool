@@ -103,8 +103,20 @@ Beyond the primary MSFT walkthrough above, the pipeline has been run end-to-end 
 - **CAT (Caterpillar, cyclical industrial)** — confirmed the "historical-median growth lags a fast-moving narrative" pattern generalizes beyond MSFT (CAT's AI-power-demand-driven re-rating shows the same dynamic as MSFT's AI capex story).
 - **TSLA (Tesla, extreme growth/optionality stock)** — the largest gap observed (~95%, implied $16.94 vs. market ~$343), driven by revenue growth: Tesla's 2025 revenue actually contracted, so the historical-median assumption (0.9%) is far below the market's forward growth expectation (25.5%). This confirmed the AI explanation layer correctly attributes gap magnitude to the right driver on a case-by-case basis - it identified growth (not WACC or capex) as dominant here, the opposite conclusion from the MSFT run, showing the prompt reasons from each case's actual numbers rather than defaulting to one explanation pattern. Also a clean illustration of DCF's structural limits: a cash-flow-based model cannot capture value the market assigns to future optionality (e.g. robotaxis, autonomy licensing) not yet reflected in financial statements.
 
+## Testing
+
+A `pytest` suite covers the core valuation logic, and is deliberately built as a record of this project's actual debugging history rather than generic sanity checks - each test is tied to a real bug found and fixed during development (the `None`-vs-`NaN` crash, the REIT capex field-name fallback, the median-vs-mean outlier resistance, the `^TNX` risk-free-rate scaling bug, and a full regression test locking in the known-correct MSFT base-case valuation).
+
+```bash
+pip install -r requirements-dev.txt
+pytest tests/ -v
+```
+
+All tests run fully offline (no API key, no live network calls - external data sources are mocked) and complete in under a second.
+
 ## Roadmap
 
 - [x] AI-assisted gap explanation — Step 6 takes the DCF output plus forward-looking analyst estimates and generates a plain-English explanation of why the implied price differs from the market price, grounded strictly in the model's own numbers (WACC, capex assumptions, growth assumptions vs. analyst forward estimates). It never generates or overrides the DCF's own figures.
+- [x] Automated test suite (`pytest`) covering core valuation logic and known past bugs
 - [ ] Analyst consensus comparison surfaced directly in the Excel output (currently used only inside the Step 6 prompt)
 - [ ] Tested against a broader, more varied set of companies beyond the five covered so far
