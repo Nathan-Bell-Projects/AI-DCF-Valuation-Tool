@@ -8,6 +8,9 @@ venv/
 __pycache__/
 *.pyc
 
+# pytest cache (generated every test run, never meant to be committed)
+.pytest_cache/
+
 # API keys - NEVER commit these
 .env
 

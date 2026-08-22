@@ -16,7 +16,8 @@ Built as a portfolio project to apply valuation work from my investment internsh
 8. Runs a comparable-company (comps) valuation - EV/EBITDA and P/E multiples vs. user-specified peers - as a second, independent valuation method alongside the DCF (free, no API key)
 9. Runs a Monte Carlo simulation (thousands of randomized DCF runs) to show a full probability distribution of outcomes instead of one point estimate - the quantitative version of Morningstar's Uncertainty Rating concept (free, no API key)
 10. Backtests the core assumption methodology itself - does historical-median growth/margin actually predict what happens next? Uses leave-future-out validation against the company's own real history (free, no API key)
-10. Exports a multi-sheet Excel workbook: Cover, Summary, Live DCF, Analyst Insights, AI Valuation Summary (optional), Comps Valuation, Football Field (chart), Monte Carlo (chart, optional), DCF Forecast, Sensitivity, and Scenario Comparison
+11. Exports a multi-sheet Excel workbook: Cover, Summary, Live DCF, Analyst Insights, AI Valuation Summary (optional), Comps Valuation (optional), Football Field chart (optional), Monte Carlo (optional), Backtest (optional), DCF Forecast, Sensitivity, and Scenario Comparison
+12. Provides a Streamlit UI as an alternative to the command-line interface
 
 ## Example output: Microsoft (MSFT)
 
@@ -45,7 +46,7 @@ Built as a portfolio project to apply valuation work from my investment internsh
 
 ## Tech stack
 
-`Python` · `yfinance` · `pandas` · `openpyxl` · `Anthropic Claude API`
+`Python` · `yfinance` · `pandas` · `numpy` · `openpyxl` · `Anthropic Claude API` · `Streamlit`
 
 ## Setup
 
@@ -88,7 +89,7 @@ python3 step3_dcf_engine.py --ticker MSFT --wacc 0.07 --terminal-growth 0.02
 # WACC / terminal growth sensitivity table
 python3 step4_sensitivity.py --ticker MSFT
 
-# Generate the full Excel workbook (Summary, Analyst Insights, Forecast, Sensitivity, Scenarios) - no API key needed
+# Generate the full Excel workbook (Cover, Summary, Live DCF, DCF Forecast, Sensitivity, Scenarios) - no API key needed
 python3 step5_excel_export.py --ticker MSFT --wacc 0.09
 
 # Same, but also include the AI Valuation Summary sheet - REQUIRES your own ANTHROPIC_API_KEY
@@ -110,19 +111,20 @@ python3 step6_ai_summary.py --ticker MSFT
 ## Project structure
 
 ```
-step1_test_setup.py       # Environment/connection test
-step2_get_financials.py   # Pull & clean financial statements
-step3_dcf_engine.py       # Core DCF: assumptions, forecast, discounting, valuation
-step4_sensitivity.py      # WACC / terminal growth sensitivity grid
-step5_excel_export.py     # Formatted Excel workbook export (no API key needed; --with-ai adds the AI sheet)
-step6_ai_summary.py       # AI-generated explanation of valuation gaps (requires ANTHROPIC_API_KEY)
-analyst_data.py           # Free analyst price targets, recommendations, rating actions (no API key)
+step1_test_setup.py        # Environment/connection test
+step2_get_financials.py    # Pull & clean financial statements
+step3_dcf_engine.py        # Core DCF: assumptions, forecast, discounting, valuation
+step4_sensitivity.py       # WACC / terminal growth sensitivity grid
+step5_excel_export.py      # Formatted Excel workbook export (no API key needed; --with-ai adds the AI sheet)
+step6_ai_summary.py        # AI-generated explanation of valuation gaps (requires ANTHROPIC_API_KEY)
+analyst_data.py            # Free analyst price targets, recommendations, rating actions (no API key)
 comps_valuation.py         # EV/EBITDA and P/E comps valuation vs. user-specified peers (no API key)
 monte_carlo.py             # Monte Carlo simulation of DCF outcomes (no API key)
-backtest.py                 # Tests whether historical-median assumptions actually predict outcomes (no API key)
-app.py                      # Streamlit UI - thin wrapper over the same tested functions, no new logic
+backtest.py                # Tests whether historical-median assumptions actually predict outcomes (no API key)
 capm_wacc.py               # CAPM-based suggested WACC calculation (no API key)
-inspect_fields.py         # Diagnostic tool: lists a ticker's actual yfinance field names
+config.py                  # Shared default constants (tax rate, WACC, ERP, sensitivity ranges)
+app.py                     # Streamlit UI - thin wrapper over the same tested functions, no new logic
+inspect_fields.py          # Diagnostic tool: lists a ticker's actual yfinance field names
 ```
 
 ## Tested on
@@ -144,9 +146,17 @@ pytest tests/ -v
 
 All tests run fully offline (no API key, no live network calls - external data sources are mocked) and complete in under a second.
 
+**Not covered by the automated suite:** `app.py` (the Streamlit UI). Streamlit's interactive, browser-driven nature doesn't fit a pytest-based approach the same way the rest of this project does - it's verified instead via manual smoke-testing (confirming the server starts cleanly with no import errors, and that a full run produces a valid, correctly-populated downloadable workbook - checked against the recalc script and cross-referenced against known-correct values). `app.py` itself contains no financial logic of its own; every computation it triggers is one of the already-tested functions above.
+
 ## Roadmap
 
 - [x] AI-assisted gap explanation — Step 6 takes the DCF output plus forward-looking analyst estimates and generates a plain-English explanation of why the implied price differs from the market price, grounded strictly in the model's own numbers (WACC, capex assumptions, growth assumptions vs. analyst forward estimates). It never generates or overrides the DCF's own figures.
 - [x] Automated test suite (`pytest`) covering core valuation logic and known past bugs
-- [ ] Analyst consensus comparison surfaced directly in the Excel output (currently used only inside the Step 6 prompt)
+- [x] Analyst consensus surfaced directly in the Excel output (Analyst Insights sheet, plus a Model vs. Street comparison table on the AI Valuation Summary sheet)
+- [x] Comps valuation (EV/EBITDA, P/E) and a football field chart comparing every valuation method in one visual
+- [x] CAPM-based suggested WACC, shown alongside (never replacing) the WACC actually used
+- [x] Monte Carlo simulation - a full probability distribution of outcomes instead of one point estimate
+- [x] Backtest of the core assumption methodology against the company's own real history
+- [x] Streamlit UI as an alternative to the command-line interface
 - [ ] Tested against a broader, more varied set of companies beyond the five covered so far
+- [ ] Batch/watchlist mode - run multiple tickers in one combined report
