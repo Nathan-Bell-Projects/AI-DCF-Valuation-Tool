@@ -13,7 +13,9 @@ Built as a portfolio project to apply valuation work from my investment internsh
 5. Bridges Enterprise Value → Equity Value → implied share price
 6. Runs a WACC / terminal growth sensitivity grid
 7. Pulls independent analyst price targets, recommendation trends, and recent rating actions (free, no API key)
-8. Exports a multi-sheet Excel workbook: Cover, Summary, Analyst Insights, AI Valuation Summary (optional), DCF Forecast, Sensitivity, and Scenario Comparison
+8. Runs a comparable-company (comps) valuation - EV/EBITDA and P/E multiples vs. user-specified peers - as a second, independent valuation method alongside the DCF (free, no API key)
+9. Runs a Monte Carlo simulation (thousands of randomized DCF runs) to show a full probability distribution of outcomes instead of one point estimate - the quantitative version of Morningstar's Uncertainty Rating concept (free, no API key)
+10. Exports a multi-sheet Excel workbook: Cover, Summary, Live DCF, Analyst Insights, AI Valuation Summary (optional), Comps Valuation, Football Field (chart), Monte Carlo (chart, optional), DCF Forecast, Sensitivity, and Scenario Comparison
 
 ## Example output: Microsoft (MSFT)
 
@@ -33,6 +35,9 @@ Built as a portfolio project to apply valuation work from my investment internsh
 - **Net working capital is included** (Current Assets − Cash) − Current Liabilities, forecast as a constant % of revenue, with the *change* in NWC subtracted from FCF each year. This was added after benchmarking against a Corporate Finance Institute DCF template, which flagged it as a standard adjustment an earlier version of this tool was missing.
 - **Assumptions are overridable via command-line arguments** (`--capex-override`, `--wacc`, `--terminal-growth`), not hardcoded, so every judgment call is explicit and auditable rather than silently baked in.
 - **CAPM-based WACC is a suggestion, not an automatic override.** `capm_wacc.py` computes Cost of Equity (Risk-Free Rate + Beta × Equity Risk Premium), an estimated after-tax Cost of Debt (from interest expense / total debt, with a fallback credit-spread if unavailable), and blends them by capital structure weight into a suggested WACC - shown on the Summary and Live DCF sheets alongside, never replacing, the WACC actually used in the valuation. Testing this against real data caught a real bug (an incorrect scaling assumption on the Treasury yield ticker, `^TNX`, that silently produced a ~0.5% risk-free rate instead of ~4.7%) - now guarded with a sanity-bounds check. Testing on PG also surfaced a genuine limitation of CAPM itself: see the PG entry under "Tested on" below.
+- **Comps valuation uses user-specified peers, not auto-detection.** Auto-detecting "similar" companies is unreliable; the peer list is an explicit `--peers` argument, same "auditable input over black-box automation" philosophy as everything else in this project. EV/EBITDA and P/E multiples come from yfinance's own pre-computed figures rather than being re-derived. A peer missing a multiple is excluded from that specific median rather than crashing the comparison.
+- **The football field chart (openpyxl) needed hand-debugging against real Excel rendering, not just the automated formula-recalc check.** `recalc.py`'s LibreOffice round-trip verifies formulas evaluate correctly, but it does NOT guarantee chart layout/formatting survives identically - in practice it silently altered axis title placement and even swapped explicit `axPos` settings between axes during testing. The chart's category-vs-value axis semantics in openpyxl were also a real source of a bug: `x_axis` is always the category axis and `y_axis` is always the value axis, regardless of visual bar orientation - counter to what the visual layout suggests. Getting this chart right took three rounds of real-Excel-screenshot verification, not just a clean recalc pass.
+- **Monte Carlo simulation randomizes revenue growth, WACC, and terminal growth only** (a documented v1 scope decision - these are the DCF's biggest value drivers, per the sensitivity table). EBIT margin, capex %, D&A %, and NWC % stay fixed at their historical-median values. Revenue growth's standard deviation is derived from the company's own historical year-over-year variance, not an arbitrary guess. A real bug was found and fixed here too: an early version printed a debug line every time an override was applied - fine for a single DCF run, but it flooded the terminal with thousands of unreadable lines across a batch of simulations. Fixed with a `verbose` parameter (now threaded through `get_historical_assumptions` and `run_dcf_scenario`), and locked in with a dedicated regression test.
 - **Not validated for companies with structurally negative growth**, where a perpetuity-growth terminal value is a poor fit regardless of implementation.
 - **Single currency assumption.** Financials are used as reported by yfinance; no currency conversion is applied, so non-USD-reporting companies would need manual handling.
 
@@ -77,6 +82,12 @@ python3 step5_excel_export.py --ticker MSFT --wacc 0.09
 # Same, but also include the AI Valuation Summary sheet - REQUIRES your own ANTHROPIC_API_KEY
 python3 step5_excel_export.py --ticker MSFT --wacc 0.09 --with-ai
 
+# Add comps valuation + football field chart vs. named peers - free, no API key needed
+python3 step5_excel_export.py --ticker MSFT --peers GOOGL,ORCL,CRM
+
+# Add a Monte Carlo simulation (distribution of outcomes, not one point estimate) - free, no API key needed
+python3 step5_excel_export.py --ticker MSFT --monte-carlo 2000
+
 # AI-generated explanation of the implied-vs-market price gap - REQUIRES your own ANTHROPIC_API_KEY
 python3 step6_ai_summary.py --ticker MSFT
 ```
@@ -91,6 +102,8 @@ step4_sensitivity.py      # WACC / terminal growth sensitivity grid
 step5_excel_export.py     # Formatted Excel workbook export (no API key needed; --with-ai adds the AI sheet)
 step6_ai_summary.py       # AI-generated explanation of valuation gaps (requires ANTHROPIC_API_KEY)
 analyst_data.py           # Free analyst price targets, recommendations, rating actions (no API key)
+comps_valuation.py         # EV/EBITDA and P/E comps valuation vs. user-specified peers (no API key)
+monte_carlo.py             # Monte Carlo simulation of DCF outcomes (no API key)
 capm_wacc.py               # CAPM-based suggested WACC calculation (no API key)
 inspect_fields.py         # Diagnostic tool: lists a ticker's actual yfinance field names
 ```

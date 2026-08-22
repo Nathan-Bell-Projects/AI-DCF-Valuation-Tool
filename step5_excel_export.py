@@ -15,6 +15,7 @@ in editable financial models.
 
 import math
 from datetime import date
+import numpy as np
 import pandas as pd
 from openpyxl import Workbook
 from openpyxl.styles import Font, PatternFill, Alignment, Border, Side
@@ -137,7 +138,8 @@ def build_cover_sheet(ws, ticker: str, company_name: str):
         ws.cell(row=r, column=c).fill = SECTION_FILL
     r += 1
     for label in ["Summary", "Live DCF (Editable)", "Analyst Insights", "AI Valuation Summary",
-                  "DCF Forecast", "Sensitivity", "Scenarios"]:
+                  "Comps Valuation", "Football Field", "Monte Carlo", "DCF Forecast",
+                  "Sensitivity", "Scenarios"]:
         ws.cell(row=r, column=1, value=f"\u2022  {label}").font = BODY_FONT
         r += 1
     r += 1
@@ -700,10 +702,319 @@ def build_live_dcf_sheet(ws, ticker, company_name, assumptions, cash, total_debt
 
     for col_letter, width in zip("ABCDEFGH", [32, 16, 16, 16, 16, 16, 12, 12]):
         ws.column_dimensions[col_letter].width = width
+
+
+# ---------------------------------------------------------------
+# Comps Valuation sheet + Football Field chart
+# ---------------------------------------------------------------
+from openpyxl.chart import BarChart, Reference
+
+
+def build_comps_sheet(ws, ticker, company_name, comps_info, current_price):
+    _draw_banner(ws, f"{ticker} \u2014 Comparable Company Analysis", company_name)
+
+    r = 4
+    ws.cell(row=r, column=1,
+            value="A second, independent valuation method: instead of forecasting cash flows, this "
+                  "values the company based on what similar public companies currently trade at. "
+                  "Peers are chosen deliberately, not auto-detected.")
+    ws.cell(row=r, column=1).font = DISCLAIMER_FONT
+    ws.cell(row=r, column=1).alignment = Alignment(wrap_text=True)
+    ws.merge_cells(start_row=r, start_column=1, end_row=r, end_column=6)
+    ws.row_dimensions[r].height = 28
+    r += 2
+
+    ws.cell(row=r, column=1, value="Peer Comparison").font = SECTION_FONT
+    for c in range(1, 6):
+        ws.cell(row=r, column=c).fill = SECTION_FILL
+    r += 1
+
+    comps_df = comps_info["comps_table"]
+    headers = ["Ticker", "Company", "EV/EBITDA", "P/E", "Market Cap"]
+    for col_num, header in enumerate(headers, start=1):
+        ws.cell(row=r, column=col_num, value=header)
+    _style_header_row(ws, r, len(headers))
+    r += 1
+
+    for idx, row in comps_df.iterrows():
+        is_target = idx == ticker
+        font = Font(name=FONT_NAME, bold=True, color=NAVY) if is_target else BODY_FONT
+        ws.cell(row=r, column=1, value=idx).font = font
+        ws.cell(row=r, column=2, value=row.get("Company")).font = font
+        ev_ebitda_cell = ws.cell(row=r, column=3, value=row.get("EV/EBITDA"))
+        ev_ebitda_cell.font = font
+        if pd.notna(row.get("EV/EBITDA")):
+            ev_ebitda_cell.number_format = "0.0x"
+        pe_cell = ws.cell(row=r, column=4, value=row.get("P/E"))
+        pe_cell.font = font
+        if pd.notna(row.get("P/E")):
+            pe_cell.number_format = "0.0x"
+        mcap_cell = ws.cell(row=r, column=5, value=row.get("Market Cap"))
+        mcap_cell.font = font
+        if pd.notna(row.get("Market Cap")):
+            mcap_cell.number_format = "$#,##0,,\" M\""
+        for c in range(1, 6):
+            ws.cell(row=r, column=c).border = THIN_BORDER
+        r += 1
+    r += 1
+
+    ws.cell(row=r, column=1, value="Implied Share Price by Method").font = SECTION_FONT
+    for c in range(1, 5):
+        ws.cell(row=r, column=c).fill = SECTION_FILL
+    r += 1
+    headers2 = ["Method", "Low", "Median/Base", "High"]
+    for col_num, header in enumerate(headers2, start=1):
+        ws.cell(row=r, column=col_num, value=header)
+    _style_header_row(ws, r, len(headers2))
+    r += 1
+
+    price_rows = [
+        ("EV/EBITDA Multiple", comps_info["implied_price_ev_ebitda_low"],
+         comps_info["implied_price_ev_ebitda"], comps_info["implied_price_ev_ebitda_high"]),
+        ("P/E Multiple", comps_info["implied_price_pe_low"],
+         comps_info["implied_price_pe"], comps_info["implied_price_pe_high"]),
+    ]
+    for label, low, mid, high in price_rows:
+        ws.cell(row=r, column=1, value=label).font = LABEL_FONT
+        for col, val in zip([2, 3, 4], [low, mid, high]):
+            cell = ws.cell(row=r, column=col, value=val)
+            cell.font = BODY_FONT
+            if val is not None:
+                cell.number_format = "$#,##0.00"
+            cell.border = THIN_BORDER
+        r += 1
+    r += 1
+
+    ws.cell(row=r, column=1, value=f"Current Market Price: ${current_price:,.2f}").font = LABEL_FONT
+    r += 2
+
+    ws.cell(row=r, column=1,
+            value="Limitation: peer multiples reflect current market sentiment (including any "
+                  "sector-wide optimism or pessimism), not independently-derived fundamentals - "
+                  "unlike the DCF, this method can't distinguish 'the whole sector is overvalued' "
+                  "from 'this company deserves its current multiple'.")
+    ws.cell(row=r, column=1).font = DISCLAIMER_FONT
+    ws.cell(row=r, column=1).alignment = Alignment(wrap_text=True)
+    ws.merge_cells(start_row=r, start_column=1, end_row=r, end_column=6)
+    ws.row_dimensions[r].height = 40
+
+    _autofit_columns(ws)
+
+
+def build_football_field_sheet(ws, ticker, company_name, dcf_low, dcf_high,
+                                  comps_info, analyst_info, current_price):
+    """A horizontal 'floating bar' chart comparing the implied price RANGE
+    from every valuation method built in this project, plus analyst
+    targets and the current market price - all on one chart."""
+    _draw_banner(ws, f"{ticker} \u2014 Football Field", company_name)
+
+    ws.cell(row=4, column=1,
+            value="Each bar shows the low-to-high implied share price range from one valuation "
+                  "method. The current market price is noted below for reference.")
+    ws.cell(row=4, column=1).font = DISCLAIMER_FONT
+    ws.merge_cells("A4:F4")
+    ws.row_dimensions[4].height = 28
+
+    # Football field charts are conventionally built as STACKED horizontal
+    # bars: an invisible "base" segment (= the low value) plus a visible
+    # "range" segment (= high - low) stacked on top of it - this makes each
+    # bar visually float between its low and high value instead of
+    # starting at 0.
+    header_row = 6
+    ws.cell(row=header_row, column=1, value="Method")
+    ws.cell(row=header_row, column=2, value="Low (base, hidden)")
+    ws.cell(row=header_row, column=3, value="Range (High - Low)")
+    ws.cell(row=header_row, column=4, value="Low")
+    ws.cell(row=header_row, column=5, value="High")
+    _style_header_row(ws, header_row, 5)
+
+    target_price = current_price if current_price else 0
+    methods = [
+        ("DCF (Base Case \u00b1 Scenarios)", dcf_low, dcf_high),
+        ("Comps: EV/EBITDA", comps_info["implied_price_ev_ebitda_low"], comps_info["implied_price_ev_ebitda_high"]),
+        ("Comps: P/E", comps_info["implied_price_pe_low"], comps_info["implied_price_pe_high"]),
+    ]
+    if analyst_info and analyst_info.get("price_targets"):
+        targets = analyst_info["price_targets"]
+        if targets.get("low") is not None and targets.get("high") is not None:
+            methods.append(("Analyst Target Range", targets["low"], targets["high"]))
+
+    r = header_row + 1
+    first_data_row = r
+    for label, low, high in methods:
+        low = low if low is not None else 0
+        high = high if high is not None else 0
+        ws.cell(row=r, column=1, value=label).font = LABEL_FONT
+        ws.cell(row=r, column=2, value=low).number_format = "$#,##0"
+        ws.cell(row=r, column=3, value=max(high - low, 0)).number_format = "$#,##0"
+        ws.cell(row=r, column=4, value=low).number_format = "$#,##0"
+        ws.cell(row=r, column=5, value=high).number_format = "$#,##0"
+        r += 1
+    last_data_row = r - 1
+
+    ws.cell(row=r + 1, column=1, value=f"Current Market Price: ${target_price:,.2f}").font = Font(
+        name=FONT_NAME, bold=True, color=NAVY)
+
+    # --- Build the stacked horizontal bar chart ---
+    chart = BarChart()
+    chart.type = "bar"  # horizontal bars
+    chart.grouping = "stacked"
+    chart.overlap = 100
+    chart.title = f"{ticker} Valuation Range by Method"
+    chart.height = 10
+    chart.width = 22
+
+    cats = Reference(ws, min_col=1, min_row=first_data_row, max_row=last_data_row)
+    base_data = Reference(ws, min_col=2, min_row=header_row, max_row=last_data_row)
+    range_data = Reference(ws, min_col=3, min_row=header_row, max_row=last_data_row)
+    chart.add_data(base_data, titles_from_data=True)
+    chart.add_data(range_data, titles_from_data=True)
+    chart.set_categories(cats)
+
+    # IMPORTANT openpyxl quirk: x_axis is ALWAYS the category axis and
+    # y_axis is ALWAYS the value axis, regardless of bar orientation - even
+    # though a horizontal bar chart visually displays the category axis
+    # running down the left side. An earlier version of this code set the
+    # value-axis title on x_axis (the wrong one), which is the likely cause
+    # of the method labels not rendering correctly.
+    #
+    # No value-axis title is set here - the "$0, $100, $200..." price scale
+    # is already self-explanatory, and a separate axis title was rendering
+    # on top of the chart title (overlapping text) rather than cleanly
+    # below the axis.
+    chart.x_axis.title = None  # category axis - the method names are self-explanatory
+    chart.x_axis.delete = False  # ensure category (method name) labels are shown
+    chart.y_axis.delete = False
+    # Category axis order defaults to bottom-to-top for a horizontal bar
+    # chart, which reverses the table's top-to-bottom row order. Flipping
+    # this makes the chart's visual order match the data table above it.
+    chart.x_axis.scaling.orientation = "maxMin"
+    # Explicitly pin each axis's physical position - flipping the category
+    # order above appears to have side-effects on automatic axis placement
+    # (the value axis was rendering at the top, colliding with the chart
+    # title, instead of its conventional position at the bottom).
+    chart.x_axis.axPos = "l"  # category axis on the left
+    chart.y_axis.axPos = "b"  # value axis (price scale) at the bottom
+    chart.title.overlay = False  # reserve dedicated space for the title, never let it share space with the plot
+
+    # Make the "base" (low-value) series invisible - the standard
+    # football-field trick, so bars appear to float between low and high
+    # instead of starting at zero.
+    base_series = chart.series[0]
+    base_series.graphicalProperties.noFill = True
+    base_series.graphicalProperties.ln.noFill = True
+
+    range_series = chart.series[1]
+    range_series.graphicalProperties.solidFill = "0B2545"  # navy, matches the workbook palette
+
+    chart.legend = None
+    ws.add_chart(chart, f"A{r + 3}")
+
+    for col_letter, width in zip("ABCDE", [28, 16, 18, 14, 14]):
+        ws.column_dimensions[col_letter].width = width
+
+
+# ---------------------------------------------------------------
+# Monte Carlo sheet - distribution of outcomes, not one point estimate
+# ---------------------------------------------------------------
+def build_monte_carlo_sheet(ws, ticker, company_name, mc_info, current_price):
+    """The quantitative version of Morningstar's Uncertainty Rating (from
+    the very first report analyzed in this project): instead of one
+    implied price, show the full distribution from thousands of simulated
+    DCF runs with randomized revenue growth, WACC, and terminal growth."""
+    _draw_banner(ws, f"{ticker} \u2014 Monte Carlo Simulation", company_name)
+
+    r = 4
+    ws.cell(row=r, column=1,
+            value=f"{mc_info['n_simulations_completed']:,} simulations, randomizing revenue growth "
+                  f"(historical std dev: {mc_info['growth_std_used']:.1%}), WACC (std dev: "
+                  f"{mc_info['wacc_std_used']:.1%}), and terminal growth (std dev: "
+                  f"{mc_info['terminal_growth_std_used']:.1%}). EBIT margin, capex %, D&A %, and NWC % "
+                  f"are held at their historical-median values - a documented v1 simplification.")
+    ws.cell(row=r, column=1).font = DISCLAIMER_FONT
+    ws.cell(row=r, column=1).alignment = Alignment(wrap_text=True)
+    ws.merge_cells(start_row=r, start_column=1, end_row=r, end_column=8)
+    ws.row_dimensions[r].height = 40
+    r += 2
+
+    ws.cell(row=r, column=1, value="Distribution Summary").font = SECTION_FONT
+    for c in range(1, 3):
+        ws.cell(row=r, column=c).fill = SECTION_FILL
+    r += 1
+
+    stats_rows = [
+        ("Mean Implied Price", mc_info["mean"]),
+        ("Median Implied Price", mc_info["median"]),
+        ("Std Deviation", mc_info["std"]),
+        ("5th Percentile", mc_info["p5"]),
+        ("25th Percentile", mc_info["p25"]),
+        ("75th Percentile", mc_info["p75"]),
+        ("95th Percentile", mc_info["p95"]),
+        ("Min", mc_info["min"]),
+        ("Max", mc_info["max"]),
+    ]
+    for label, value in stats_rows:
+        ws.cell(row=r, column=1, value=label).font = LABEL_FONT
+        vcell = ws.cell(row=r, column=2, value=value)
+        vcell.number_format = "$#,##0.00"
+        vcell.font = BODY_FONT
+        r += 1
+    r += 1
+
+    if current_price:
+        prob = float((mc_info["prices"] > current_price).mean())
+        ws.cell(row=r, column=1,
+                value=f"Probability simulated DCF exceeds current market price (${current_price:,.2f})").font = LABEL_FONT
+        pcell = ws.cell(row=r, column=2, value=prob)
+        pcell.number_format = "0.0%"
+        pcell.font = Font(name=FONT_NAME, bold=True, color=NAVY)
+        r += 2
+
+    # --- Histogram: bin the simulated prices, chart the frequency ---
+    ws.cell(row=r, column=1, value="Distribution of Outcomes").font = SECTION_FONT
+    for c in range(1, 3):
+        ws.cell(row=r, column=c).fill = SECTION_FILL
+    r += 1
+
+    counts, bin_edges = np.histogram(mc_info["prices"], bins=20)
+    header_row = r
+    ws.cell(row=header_row, column=1, value="Price Range")
+    ws.cell(row=header_row, column=2, value="Frequency")
+    _style_header_row(ws, header_row, 2)
+    r += 1
+    first_data_row = r
+    for i in range(len(counts)):
+        label = f"${bin_edges[i]:,.0f}-{bin_edges[i+1]:,.0f}"
+        ws.cell(row=r, column=1, value=label).font = BODY_FONT
+        ws.cell(row=r, column=2, value=int(counts[i])).font = BODY_FONT
+        r += 1
+    last_data_row = r - 1
+
+    chart = BarChart()
+    chart.type = "col"
+    chart.title = f"{ticker} Simulated Implied Price Distribution"
+    chart.y_axis.title = "Frequency"
+    chart.x_axis.title = None
+    chart.x_axis.delete = False
+    chart.height = 9
+    chart.width = 22
+    chart.legend = None
+    data = Reference(ws, min_col=2, min_row=header_row, max_row=last_data_row)
+    cats = Reference(ws, min_col=1, min_row=first_data_row, max_row=last_data_row)
+    chart.add_data(data, titles_from_data=True)
+    chart.set_categories(cats)
+    chart.series[0].graphicalProperties.solidFill = "0B2545"
+    ws.add_chart(chart, f"D{header_row}")
+
+    for col_letter, width in zip("ABCDEFGH", [26, 14, 14, 14, 14, 14, 14, 14]):
+        ws.column_dimensions[col_letter].width = width
+
+
 def export_to_excel(ticker, company_name, current_price, result, assumptions, forecast_df,
                      sensitivity_df, cash, total_debt, shares_outstanding,
                      scenarios=None, ai_output=None, gap_pct=None, analyst_info=None,
                      wacc=0.09, terminal_growth=0.025, tax_rate=0.21, capm_info=None,
+                     comps_info=None, monte_carlo_info=None,
                      output_path="dcf_output.xlsx"):
     wb = Workbook()
 
@@ -719,6 +1030,24 @@ def export_to_excel(ticker, company_name, current_price, result, assumptions, fo
     build_live_dcf_sheet(live_ws, ticker, company_name, assumptions, cash, total_debt,
                           shares_outstanding, current_price, wacc, terminal_growth, tax_rate,
                           capm_info=capm_info)
+
+    if comps_info is not None:
+        comps_ws = wb.create_sheet("Comps Valuation")
+        build_comps_sheet(comps_ws, ticker, company_name, comps_info, current_price)
+
+        if scenarios:
+            scenario_prices = [s["implied_price"] for s in scenarios]
+            dcf_low, dcf_high = min(scenario_prices), max(scenario_prices)
+        else:
+            dcf_low = dcf_high = result["implied_share_price"]
+
+        ff_ws = wb.create_sheet("Football Field")
+        build_football_field_sheet(ff_ws, ticker, company_name, dcf_low, dcf_high,
+                                     comps_info, analyst_info, current_price)
+
+    if monte_carlo_info is not None:
+        mc_ws = wb.create_sheet("Monte Carlo")
+        build_monte_carlo_sheet(mc_ws, ticker, company_name, monte_carlo_info, current_price)
 
     if analyst_info is not None:
         analyst_ws = wb.create_sheet("Analyst Insights")
@@ -750,22 +1079,38 @@ if __name__ == "__main__":
     import yfinance as yf
     from step3_dcf_engine import get_dcf_inputs, get_historical_assumptions, forecast_free_cash_flow, calculate_dcf_valuation
     from step4_sensitivity import build_sensitivity_table
+    from config import DEFAULT_WACC, DEFAULT_TERMINAL_GROWTH
 
     parser = argparse.ArgumentParser(description="Export a full DCF analysis to Excel.")
     parser.add_argument("--ticker", default="MSFT", help="Stock ticker, e.g. MSFT")
-    parser.add_argument("--wacc", type=float, default=0.09, help="Base case discount rate")
-    parser.add_argument("--terminal-growth", type=float, default=0.025, dest="terminal_growth",
+    parser.add_argument("--wacc", type=float, default=DEFAULT_WACC, help="Base case discount rate")
+    parser.add_argument("--terminal-growth", type=float, default=DEFAULT_TERMINAL_GROWTH, dest="terminal_growth",
                          help="Base case terminal growth rate")
     parser.add_argument("--capex-override", type=float, default=None, dest="capex_override",
                          help="Optional: manually set capex as %% of revenue for an alternate scenario.")
     parser.add_argument("--with-ai", action="store_true", dest="with_ai",
                          help="Include the AI Valuation Summary sheet (calls the Anthropic API - "
                               "requires ANTHROPIC_API_KEY to be set, and incurs a small API cost).")
+    parser.add_argument("--peers", default=None,
+                         help="Comma-separated list of peer tickers for comps valuation, "
+                              "e.g. --peers GOOGL,ORCL,CRM. Adds Comps Valuation and Football "
+                              "Field sheets. Free, no API key needed.")
+    parser.add_argument("--monte-carlo", type=int, default=None, dest="monte_carlo",
+                         help="Number of Monte Carlo simulations to run (e.g. 1000). Adds a "
+                              "Monte Carlo sheet showing the distribution of outcomes instead "
+                              "of one point estimate. Free, no API key needed.")
     args = parser.parse_args()
 
     ticker = args.ticker
     df = get_dcf_inputs(ticker)
 
+    from step3_dcf_engine import run_dcf_scenario
+    from config import DEFAULT_SENSITIVITY_WACC_RANGE, DEFAULT_SENSITIVITY_GROWTH_RANGE
+
+    # get_historical_assumptions/forecast_free_cash_flow don't need cash,
+    # debt, or shares - only the final calculate_dcf_valuation step does.
+    # So these two run first to determine latest_year, which is needed to
+    # look up cash/debt from the DataFrame, before the full scenario runs.
     assumptions = get_historical_assumptions(df)
     forecast_df = forecast_free_cash_flow(assumptions)
 
@@ -777,41 +1122,39 @@ if __name__ == "__main__":
     current_price = stock_info.get("currentPrice")
     company_name = stock_info.get("longName", ticker)
 
-    result = calculate_dcf_valuation(
-        forecast_df, wacc=args.wacc, terminal_growth=args.terminal_growth,
-        cash=cash, total_debt=total_debt, shares_outstanding=shares_outstanding,
-    )
+    base = run_dcf_scenario(df, cash=cash, total_debt=total_debt,
+                              shares_outstanding=shares_outstanding,
+                              wacc=args.wacc, terminal_growth=args.terminal_growth)
+    result = base["result"]
     gap_pct = result["implied_share_price"] / current_price - 1
 
     sensitivity_df = build_sensitivity_table(
         forecast_df, cash, total_debt, shares_outstanding,
-        wacc_range=[0.07, 0.08, 0.09, 0.10, 0.11],
-        growth_range=[0.015, 0.02, 0.025, 0.03, 0.035],
+        wacc_range=DEFAULT_SENSITIVITY_WACC_RANGE,
+        growth_range=DEFAULT_SENSITIVITY_GROWTH_RANGE,
     )
 
-    def run_scenario(label, wacc, terminal_growth, capex_override=None):
-        sc_overrides = {"avg_capex_pct_revenue": capex_override} if capex_override is not None else None
-        sc_assumptions = get_historical_assumptions(df, overrides=sc_overrides)
-        sc_forecast = forecast_free_cash_flow(sc_assumptions)
-        sc_result = calculate_dcf_valuation(
-            sc_forecast, wacc=wacc, terminal_growth=terminal_growth,
-            cash=cash, total_debt=total_debt, shares_outstanding=shares_outstanding,
-        )
+    def build_scenario_entry(label, wacc, terminal_growth, capex_override=None):
+        overrides = {"avg_capex_pct_revenue": capex_override} if capex_override is not None else None
+        scenario = run_dcf_scenario(df, cash=cash, total_debt=total_debt,
+                                      shares_outstanding=shares_outstanding,
+                                      wacc=wacc, terminal_growth=terminal_growth,
+                                      overrides=overrides)
         return {
             "label": label,
             "capex_label": f"{capex_override:.0%}" if capex_override is not None else "Historical median",
             "wacc": wacc,
             "terminal_growth": terminal_growth,
-            "implied_price": sc_result["implied_share_price"],
+            "implied_price": scenario["result"]["implied_share_price"],
         }
 
     scenarios = [
-        run_scenario("Base case", args.wacc, args.terminal_growth),
-        run_scenario(f"Lower WACC ({args.wacc - 0.02:.1%})", args.wacc - 0.02, args.terminal_growth),
-        run_scenario(f"Higher WACC ({args.wacc + 0.02:.1%})", args.wacc + 0.02, args.terminal_growth),
+        build_scenario_entry("Base case", args.wacc, args.terminal_growth),
+        build_scenario_entry(f"Lower WACC ({args.wacc - 0.02:.1%})", args.wacc - 0.02, args.terminal_growth),
+        build_scenario_entry(f"Higher WACC ({args.wacc + 0.02:.1%})", args.wacc + 0.02, args.terminal_growth),
     ]
     if args.capex_override is not None:
-        scenarios.append(run_scenario(
+        scenarios.append(build_scenario_entry(
             f"Custom capex override ({args.capex_override:.0%} of revenue)",
             args.wacc, args.terminal_growth, capex_override=args.capex_override,
         ))
@@ -836,9 +1179,30 @@ if __name__ == "__main__":
                 args.wacc, args.terminal_growth, analyst_info=analyst_info,
             )
 
+    comps_info = None
+    if args.peers:
+        from comps_valuation import compute_comps_valuation
+        peer_tickers = [p.strip().upper() for p in args.peers.split(",")]
+        print(f"Pulling comps data for peers: {peer_tickers} (free, no API key needed)...")
+        comps_info = compute_comps_valuation(
+            ticker, peer_tickers, shares_outstanding, cash, total_debt,
+        )
+
+    monte_carlo_info = None
+    if args.monte_carlo:
+        from monte_carlo import run_monte_carlo
+        print(f"Running {args.monte_carlo} Monte Carlo simulations (free, no API key needed)...")
+        monte_carlo_info = run_monte_carlo(
+            df, cash=cash, total_debt=total_debt, shares_outstanding=shares_outstanding,
+            wacc_base=args.wacc, terminal_growth_base=args.terminal_growth,
+            n_simulations=args.monte_carlo,
+        )
+        print(f"  Completed {monte_carlo_info['n_simulations_completed']} / {monte_carlo_info['n_simulations_requested']}")
+
     export_to_excel(ticker, company_name, current_price, result, assumptions, forecast_df,
                      sensitivity_df, cash, total_debt, shares_outstanding,
                      scenarios=scenarios, ai_output=ai_output, gap_pct=gap_pct,
-                     analyst_info=analyst_info, capm_info=capm_info,
+                     analyst_info=analyst_info, capm_info=capm_info, comps_info=comps_info,
+                     monte_carlo_info=monte_carlo_info,
                      wacc=args.wacc, terminal_growth=args.terminal_growth,
                      output_path=f"{ticker}_dcf_output.xlsx")

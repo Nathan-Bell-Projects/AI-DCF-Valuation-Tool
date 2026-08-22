@@ -21,11 +21,7 @@ is fully visible and auditable, not a black-box single number.
 """
 
 import yfinance as yf
-
-DEFAULT_RISK_FREE_RATE = 0.04       # fallback if the live Treasury yield pull fails
-DEFAULT_EQUITY_RISK_PREMIUM = 0.05  # standard, widely-used long-run market risk premium
-DEFAULT_CREDIT_SPREAD = 0.015       # fallback pre-tax cost of debt = risk-free rate + this, if
-                                     # interest expense / debt can't be computed
+from config import DEFAULT_RISK_FREE_RATE, DEFAULT_EQUITY_RISK_PREMIUM, DEFAULT_CREDIT_SPREAD, DEFAULT_TAX_RATE
 
 
 def get_risk_free_rate() -> float:
@@ -51,7 +47,7 @@ def get_risk_free_rate() -> float:
         return DEFAULT_RISK_FREE_RATE
 
 
-def compute_capm_wacc(ticker: str, df, stock_info: dict, tax_rate: float = 0.21,
+def compute_capm_wacc(ticker: str, df, stock_info: dict, tax_rate: float = DEFAULT_TAX_RATE,
                         equity_risk_premium: float = DEFAULT_EQUITY_RISK_PREMIUM,
                         risk_free_rate: float = None) -> dict:
     """Returns a dict with every component of the calculation, not just the

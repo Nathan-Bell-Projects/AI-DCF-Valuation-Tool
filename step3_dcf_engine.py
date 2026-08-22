@@ -15,13 +15,14 @@ work - we're just writing it as code instead of Excel formulas.
 
 import pandas as pd
 from step2_get_financials import get_dcf_inputs
+from config import DEFAULT_TAX_RATE, DEFAULT_WACC, DEFAULT_TERMINAL_GROWTH, DEFAULT_FORECAST_YEARS
 
 
 # ---------------------------------------------------------------
 # 1. Derive assumptions from historical data
 # ---------------------------------------------------------------
 def get_historical_assumptions(df: pd.DataFrame, method: str = "median",
-                                 overrides: dict = None) -> dict:
+                                 overrides: dict = None, verbose: bool = True) -> dict:
     """Look at the last few actual years and derive reasonable forecast
     assumptions: revenue growth, EBIT margin, capex as % of revenue,
     D&A as % of revenue.
@@ -34,7 +35,11 @@ def get_historical_assumptions(df: pd.DataFrame, method: str = "median",
     overrides: optional dict to manually force specific assumption values,
     e.g. {"avg_capex_pct_revenue": 0.15}. Anything you pass here wins over
     the historically-derived number. This is also the hook the AI-assisted
-    layer will use later - it'll suggest values that get passed in here."""
+    layer will use later - it'll suggest values that get passed in here.
+
+    verbose: set False to suppress the '[override] ...' print line - added
+    for Monte Carlo simulation, which calls this thousands of times and
+    would otherwise flood the terminal with an unreadable wall of text."""
 
     df = df.dropna(axis=1, how="all")
     years = sorted(df.columns)
@@ -76,7 +81,8 @@ def get_historical_assumptions(df: pd.DataFrame, method: str = "median",
     # Apply any manual overrides on top of the derived values
     if overrides:
         for key, value in overrides.items():
-            print(f"  [override] {key}: {assumptions.get(key)} -> {value}")
+            if verbose:
+                print(f"  [override] {key}: {assumptions.get(key)} -> {value}")
             assumptions[key] = value
 
     return assumptions
@@ -85,8 +91,8 @@ def get_historical_assumptions(df: pd.DataFrame, method: str = "median",
 # ---------------------------------------------------------------
 # 2. Forecast future free cash flow
 # ---------------------------------------------------------------
-def forecast_free_cash_flow(assumptions: dict, forecast_years: int = 5,
-                              tax_rate: float = 0.21) -> pd.DataFrame:
+def forecast_free_cash_flow(assumptions: dict, forecast_years: int = DEFAULT_FORECAST_YEARS,
+                              tax_rate: float = DEFAULT_TAX_RATE) -> pd.DataFrame:
     """Project revenue, EBIT, and free cash flow forward using the
     assumptions derived above. NOTE: this v1 ignores changes in net
     working capital for simplicity - a documented, defensible
@@ -181,14 +187,46 @@ def calculate_dcf_valuation(forecast_df: pd.DataFrame, wacc: float,
     }
 
 
+# ---------------------------------------------------------------
+# Convenience wrapper: run the full DCF end to end in one call
+# ---------------------------------------------------------------
+def run_dcf_scenario(df: pd.DataFrame, cash: float, total_debt: float,
+                       shares_outstanding: float, wacc: float = DEFAULT_WACC,
+                       terminal_growth: float = DEFAULT_TERMINAL_GROWTH,
+                       tax_rate: float = DEFAULT_TAX_RATE, method: str = "median",
+                       overrides: dict = None, verbose: bool = True) -> dict:
+    """Bundles get_historical_assumptions + forecast_free_cash_flow +
+    calculate_dcf_valuation into a single call - the single, reusable
+    'run a full DCF under these assumptions' entry point. Added during a
+    refactor: step5_excel_export.py previously reimplemented this exact
+    three-call sequence as a local closure for building its scenario
+    comparison table - now both use this one function, so there's a single
+    place this logic can be fixed or extended, not two.
+
+    verbose: set False to suppress override print statements - essential
+    when this is called in a loop (e.g. Monte Carlo simulation, which
+    calls this thousands of times)."""
+    assumptions = get_historical_assumptions(df, method=method, overrides=overrides, verbose=verbose)
+    forecast_df = forecast_free_cash_flow(assumptions, tax_rate=tax_rate)
+    result = calculate_dcf_valuation(
+        forecast_df, wacc=wacc, terminal_growth=terminal_growth,
+        cash=cash, total_debt=total_debt, shares_outstanding=shares_outstanding,
+    )
+    return {
+        "assumptions": assumptions,
+        "forecast_df": forecast_df,
+        "result": result,
+    }
+
+
 if __name__ == "__main__":
     import argparse
     import yfinance as yf
 
     parser = argparse.ArgumentParser(description="Run a DCF valuation for a given ticker.")
     parser.add_argument("--ticker", default="MSFT", help="Stock ticker, e.g. MSFT")
-    parser.add_argument("--wacc", type=float, default=0.09, help="Discount rate, e.g. 0.09 for 9%%")
-    parser.add_argument("--terminal-growth", type=float, default=0.025, dest="terminal_growth",
+    parser.add_argument("--wacc", type=float, default=DEFAULT_WACC, help="Discount rate, e.g. 0.09 for 9%%")
+    parser.add_argument("--terminal-growth", type=float, default=DEFAULT_TERMINAL_GROWTH, dest="terminal_growth",
                          help="Terminal growth rate, e.g. 0.025 for 2.5%%")
     parser.add_argument("--capex-override", type=float, default=None, dest="capex_override",
                          help="Manually set capex as %% of revenue (e.g. 0.15), overriding the "
