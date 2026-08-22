@@ -3,3 +3,4 @@ pandas
 openpyxl
 anthropic
 numpy
+streamlit

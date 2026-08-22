@@ -63,6 +63,16 @@ export ANTHROPIC_API_KEY="your-key-here"   # Windows PowerShell: $env:ANTHROPIC_
 
 This project never embeds or transmits any API key belonging to the original author — each user runs Step 6 against their own Anthropic account and is billed only for their own usage (a handful of cents per run). Get a key at [console.anthropic.com](https://console.anthropic.com) (separate from a claude.ai subscription; a small prepaid credit purchase is required, $5 minimum).
 
+## Streamlit Interface (optional)
+
+For a clickable UI instead of remembering command-line flags:
+
+```bash
+streamlit run app.py
+```
+
+Opens a browser tab with a sidebar for ticker, WACC, terminal growth, and toggles for every optional feature (comps, Monte Carlo, backtest, AI summary). Click "Run Analysis" to see key metrics inline, then download the full Excel workbook. `app.py` contains no new financial logic - it's a thin UI layer calling the exact same tested functions as the command-line scripts.
+
 ## Usage
 
 ```bash
@@ -110,6 +120,7 @@ analyst_data.py           # Free analyst price targets, recommendations, rating 
 comps_valuation.py         # EV/EBITDA and P/E comps valuation vs. user-specified peers (no API key)
 monte_carlo.py             # Monte Carlo simulation of DCF outcomes (no API key)
 backtest.py                 # Tests whether historical-median assumptions actually predict outcomes (no API key)
+app.py                      # Streamlit UI - thin wrapper over the same tested functions, no new logic
 capm_wacc.py               # CAPM-based suggested WACC calculation (no API key)
 inspect_fields.py         # Diagnostic tool: lists a ticker's actual yfinance field names
 ```
