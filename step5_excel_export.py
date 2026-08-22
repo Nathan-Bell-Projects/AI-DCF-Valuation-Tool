@@ -138,7 +138,7 @@ def build_cover_sheet(ws, ticker: str, company_name: str):
         ws.cell(row=r, column=c).fill = SECTION_FILL
     r += 1
     for label in ["Summary", "Live DCF (Editable)", "Analyst Insights", "AI Valuation Summary",
-                  "Comps Valuation", "Football Field", "Monte Carlo", "DCF Forecast",
+                  "Comps Valuation", "Football Field", "Monte Carlo", "Backtest", "DCF Forecast",
                   "Sensitivity", "Scenarios"]:
         ws.cell(row=r, column=1, value=f"\u2022  {label}").font = BODY_FONT
         r += 1
@@ -1010,11 +1010,96 @@ def build_monte_carlo_sheet(ws, ticker, company_name, mc_info, current_price):
         ws.column_dimensions[col_letter].width = width
 
 
+# ---------------------------------------------------------------
+# Backtest sheet - does the core assumption methodology actually work?
+# ---------------------------------------------------------------
+def build_backtest_sheet(ws, ticker, company_name, backtest_info):
+    _draw_banner(ws, f"{ticker} \u2014 Backtest: Assumption Methodology", company_name)
+
+    r = 4
+    ws.cell(row=r, column=1,
+            value="Tests the core idea this whole model relies on: does historical-median growth/margin "
+                  "predict what actually happens next? Each row predicts a year using ONLY the years "
+                  "before it (no lookahead bias), then compares to what actually occurred. Limited to "
+                  "the ~4 years of history yfinance provides - directionally informative, not "
+                  "statistically robust with this few data points.")
+    ws.cell(row=r, column=1).font = DISCLAIMER_FONT
+    ws.cell(row=r, column=1).alignment = Alignment(wrap_text=True)
+    ws.merge_cells(start_row=r, start_column=1, end_row=r, end_column=6)
+    ws.row_dimensions[r].height = 42
+    r += 2
+
+    ws.cell(row=r, column=1, value="EBIT Margin Predictions").font = SECTION_FONT
+    for c in range(1, 5):
+        ws.cell(row=r, column=c).fill = SECTION_FILL
+    r += 1
+    headers = ["Year", "Predicted Margin", "Actual Margin", "Error"]
+    for col_num, header in enumerate(headers, start=1):
+        ws.cell(row=r, column=col_num, value=header)
+    _style_header_row(ws, r, len(headers))
+    r += 1
+    for _, row in backtest_info["margin_results"].iterrows():
+        ws.cell(row=r, column=1, value=str(row["Year"])).font = BODY_FONT
+        for col, key in zip([2, 3, 4], ["Predicted Margin", "Actual Margin", "Error"]):
+            cell = ws.cell(row=r, column=col, value=row[key])
+            cell.number_format = "+0.00%;-0.00%" if key == "Error" else "0.00%"
+            cell.font = BODY_FONT
+            cell.border = THIN_BORDER
+        r += 1
+    if backtest_info["margin_mae"] is not None:
+        r += 1
+        ws.cell(row=r, column=1, value="Mean Absolute Error").font = LABEL_FONT
+        ws.cell(row=r, column=2, value=backtest_info["margin_mae"]).number_format = "0.00%"
+        r += 1
+        ws.cell(row=r, column=1, value="Bias (negative = under-predicts)").font = LABEL_FONT
+        bias_cell = ws.cell(row=r, column=2, value=backtest_info["margin_bias"])
+        bias_cell.number_format = "+0.00%;-0.00%"
+        bias_cell.font = Font(name=FONT_NAME, bold=True, color=NAVY)
+    r += 2
+
+    ws.cell(row=r, column=1, value="Revenue Growth Predictions").font = SECTION_FONT
+    for c in range(1, 5):
+        ws.cell(row=r, column=c).fill = SECTION_FILL
+    r += 1
+    headers2 = ["Year", "Predicted Growth", "Actual Growth", "Error"]
+    for col_num, header in enumerate(headers2, start=1):
+        ws.cell(row=r, column=col_num, value=header)
+    _style_header_row(ws, r, len(headers2))
+    r += 1
+    for _, row in backtest_info["growth_results"].iterrows():
+        ws.cell(row=r, column=1, value=str(row["Year"])).font = BODY_FONT
+        for col, key in zip([2, 3, 4], ["Predicted Growth", "Actual Growth", "Error"]):
+            cell = ws.cell(row=r, column=col, value=row[key])
+            cell.number_format = "+0.00%;-0.00%" if key == "Error" else "0.00%"
+            cell.font = BODY_FONT
+            cell.border = THIN_BORDER
+        r += 1
+    if backtest_info["growth_mae"] is not None:
+        r += 1
+        ws.cell(row=r, column=1, value="Mean Absolute Error").font = LABEL_FONT
+        ws.cell(row=r, column=2, value=backtest_info["growth_mae"]).number_format = "0.00%"
+        r += 1
+        ws.cell(row=r, column=1, value="Bias (negative = under-predicts)").font = LABEL_FONT
+        bias_cell = ws.cell(row=r, column=2, value=backtest_info["growth_bias"])
+        bias_cell.number_format = "+0.00%;-0.00%"
+        bias_cell.font = Font(name=FONT_NAME, bold=True, color=NAVY)
+    r += 2
+
+    r = _draw_wrapped_box(ws, r,
+        f"Sample size: {backtest_info['n_margin_tests']} margin predictions, "
+        f"{backtest_info['n_growth_tests']} growth predictions. This is a small sample, limited by "
+        f"available financial history - treat these results as suggestive, not statistically proven.",
+        fill=AMBER_FILL_STYLE, border=GOLD_BORDER, font=DISCLAIMER_FONT, chars_per_line=95)
+
+    for col_letter, width in zip("ABCDE", [12, 18, 16, 12, 12]):
+        ws.column_dimensions[col_letter].width = width
+
+
 def export_to_excel(ticker, company_name, current_price, result, assumptions, forecast_df,
                      sensitivity_df, cash, total_debt, shares_outstanding,
                      scenarios=None, ai_output=None, gap_pct=None, analyst_info=None,
                      wacc=0.09, terminal_growth=0.025, tax_rate=0.21, capm_info=None,
-                     comps_info=None, monte_carlo_info=None,
+                     comps_info=None, monte_carlo_info=None, backtest_info=None,
                      output_path="dcf_output.xlsx"):
     wb = Workbook()
 
@@ -1048,6 +1133,10 @@ def export_to_excel(ticker, company_name, current_price, result, assumptions, fo
     if monte_carlo_info is not None:
         mc_ws = wb.create_sheet("Monte Carlo")
         build_monte_carlo_sheet(mc_ws, ticker, company_name, monte_carlo_info, current_price)
+
+    if backtest_info is not None:
+        bt_ws = wb.create_sheet("Backtest")
+        build_backtest_sheet(bt_ws, ticker, company_name, backtest_info)
 
     if analyst_info is not None:
         analyst_ws = wb.create_sheet("Analyst Insights")
@@ -1099,6 +1188,10 @@ if __name__ == "__main__":
                          help="Number of Monte Carlo simulations to run (e.g. 1000). Adds a "
                               "Monte Carlo sheet showing the distribution of outcomes instead "
                               "of one point estimate. Free, no API key needed.")
+    parser.add_argument("--backtest", action="store_true",
+                         help="Add a Backtest sheet testing whether historical-median growth/margin "
+                              "actually predicted what happened next (leave-future-out validation). "
+                              "Free, no API key needed.")
     args = parser.parse_args()
 
     ticker = args.ticker
@@ -1199,10 +1292,16 @@ if __name__ == "__main__":
         )
         print(f"  Completed {monte_carlo_info['n_simulations_completed']} / {monte_carlo_info['n_simulations_requested']}")
 
+    backtest_info = None
+    if args.backtest:
+        from backtest import run_backtest
+        print("Running backtest (free, no API key needed)...")
+        backtest_info = run_backtest(df)
+
     export_to_excel(ticker, company_name, current_price, result, assumptions, forecast_df,
                      sensitivity_df, cash, total_debt, shares_outstanding,
                      scenarios=scenarios, ai_output=ai_output, gap_pct=gap_pct,
                      analyst_info=analyst_info, capm_info=capm_info, comps_info=comps_info,
-                     monte_carlo_info=monte_carlo_info,
+                     monte_carlo_info=monte_carlo_info, backtest_info=backtest_info,
                      wacc=args.wacc, terminal_growth=args.terminal_growth,
                      output_path=f"{ticker}_dcf_output.xlsx")

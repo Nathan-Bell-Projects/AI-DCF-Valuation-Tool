@@ -15,6 +15,7 @@ Built as a portfolio project to apply valuation work from my investment internsh
 7. Pulls independent analyst price targets, recommendation trends, and recent rating actions (free, no API key)
 8. Runs a comparable-company (comps) valuation - EV/EBITDA and P/E multiples vs. user-specified peers - as a second, independent valuation method alongside the DCF (free, no API key)
 9. Runs a Monte Carlo simulation (thousands of randomized DCF runs) to show a full probability distribution of outcomes instead of one point estimate - the quantitative version of Morningstar's Uncertainty Rating concept (free, no API key)
+10. Backtests the core assumption methodology itself - does historical-median growth/margin actually predict what happens next? Uses leave-future-out validation against the company's own real history (free, no API key)
 10. Exports a multi-sheet Excel workbook: Cover, Summary, Live DCF, Analyst Insights, AI Valuation Summary (optional), Comps Valuation, Football Field (chart), Monte Carlo (chart, optional), DCF Forecast, Sensitivity, and Scenario Comparison
 
 ## Example output: Microsoft (MSFT)
@@ -38,6 +39,7 @@ Built as a portfolio project to apply valuation work from my investment internsh
 - **Comps valuation uses user-specified peers, not auto-detection.** Auto-detecting "similar" companies is unreliable; the peer list is an explicit `--peers` argument, same "auditable input over black-box automation" philosophy as everything else in this project. EV/EBITDA and P/E multiples come from yfinance's own pre-computed figures rather than being re-derived. A peer missing a multiple is excluded from that specific median rather than crashing the comparison.
 - **The football field chart (openpyxl) needed hand-debugging against real Excel rendering, not just the automated formula-recalc check.** `recalc.py`'s LibreOffice round-trip verifies formulas evaluate correctly, but it does NOT guarantee chart layout/formatting survives identically - in practice it silently altered axis title placement and even swapped explicit `axPos` settings between axes during testing. The chart's category-vs-value axis semantics in openpyxl were also a real source of a bug: `x_axis` is always the category axis and `y_axis` is always the value axis, regardless of visual bar orientation - counter to what the visual layout suggests. Getting this chart right took three rounds of real-Excel-screenshot verification, not just a clean recalc pass.
 - **Monte Carlo simulation randomizes revenue growth, WACC, and terminal growth only** (a documented v1 scope decision - these are the DCF's biggest value drivers, per the sensitivity table). EBIT margin, capex %, D&A %, and NWC % stay fixed at their historical-median values. Revenue growth's standard deviation is derived from the company's own historical year-over-year variance, not an arbitrary guess. A real bug was found and fixed here too: an early version printed a debug line every time an override was applied - fine for a single DCF run, but it flooded the terminal with thousands of unreadable lines across a batch of simulations. Fixed with a `verbose` parameter (now threaded through `get_historical_assumptions` and `run_dcf_scenario`), and locked in with a dedicated regression test.
+- **Backtesting deliberately does NOT reconstruct historical stock prices or period-accurate WACC/beta.** yfinance's ~4-year financial statement history isn't enough to do that reliably, and a plausible-looking but unverifiable historical price comparison would be worse than not building it. Instead, it tests the assumption methodology directly: does historical-median growth/margin actually predict what happens next, using leave-future-out validation against the company's own real history. **Running this on MSFT independently rediscovered a finding this project already made manually** - the model's bias is negative (it systematically under-predicts) and the error is largest in exactly the year (the most recent one) where the AI-driven capex/growth acceleration outpaced historical trends. Two completely different methods, built weeks apart, arriving at the same conclusion.
 - **Not validated for companies with structurally negative growth**, where a perpetuity-growth terminal value is a poor fit regardless of implementation.
 - **Single currency assumption.** Financials are used as reported by yfinance; no currency conversion is applied, so non-USD-reporting companies would need manual handling.
 
@@ -88,6 +90,9 @@ python3 step5_excel_export.py --ticker MSFT --peers GOOGL,ORCL,CRM
 # Add a Monte Carlo simulation (distribution of outcomes, not one point estimate) - free, no API key needed
 python3 step5_excel_export.py --ticker MSFT --monte-carlo 2000
 
+# Add a backtest of the assumption methodology itself - free, no API key needed
+python3 step5_excel_export.py --ticker MSFT --backtest
+
 # AI-generated explanation of the implied-vs-market price gap - REQUIRES your own ANTHROPIC_API_KEY
 python3 step6_ai_summary.py --ticker MSFT
 ```
@@ -104,6 +109,7 @@ step6_ai_summary.py       # AI-generated explanation of valuation gaps (requires
 analyst_data.py           # Free analyst price targets, recommendations, rating actions (no API key)
 comps_valuation.py         # EV/EBITDA and P/E comps valuation vs. user-specified peers (no API key)
 monte_carlo.py             # Monte Carlo simulation of DCF outcomes (no API key)
+backtest.py                 # Tests whether historical-median assumptions actually predict outcomes (no API key)
 capm_wacc.py               # CAPM-based suggested WACC calculation (no API key)
 inspect_fields.py         # Diagnostic tool: lists a ticker's actual yfinance field names
 ```
