@@ -157,6 +157,36 @@ if run_button:
                        "historical-median assumptions - see Cover sheet in the Excel export "
                        "for the full disclaimer.")
 
+        # Custom styling for the download button - navy fill matches this
+        # app's brand palette (same colors used throughout the Excel
+        # export). No border at all - a gold border was tried first but
+        # read as too decorative/attention-grabbing for a financial tool;
+        # a clean solid fill looks more professional.
+        st.markdown("""
+            <style>
+            div[data-testid="stDownloadButton"] button {
+                background-color: #0B2545;
+                color: white;
+                border: none;
+                font-size: 1.05rem;
+                font-weight: 600;
+                padding: 0.7rem 1.5rem;
+            }
+            div[data-testid="stDownloadButton"] button:hover {
+                background-color: #13315C;
+                color: #C9A227;
+            }
+            </style>
+        """, unsafe_allow_html=True)
+
+        # A placeholder reserves this visual position (right after the
+        # headline metrics, before any of the detail sections below) - the
+        # actual button gets filled in here later, once the Excel file is
+        # ready, using Streamlit's placeholder pattern. This lets the button
+        # appear near the top of the page even though building the workbook
+        # is one of the last things this script does.
+        top_download_placeholder = st.empty()
+
         with st.spinner("Pulling price history..."):
             try:
                 price_history = yf.Ticker(ticker).history(period="1y")["Close"]
@@ -185,6 +215,16 @@ if run_button:
         # --- Donut charts: capital structure + analyst recommendations ---
         with st.container(border=True):
             st.markdown("##### Valuation Composition")
+            # Detect the actual active theme rather than hardcoding a text
+            # color - a fixed white fill is invisible on a light theme
+            # (confirmed via testing), and an outline-only workaround looks
+            # thin/weak compared to a genuine solid fill. This picks a bold,
+            # correctly-contrasting solid color for whichever theme is live.
+            try:
+                is_dark_theme = st.context.theme.type == "dark"
+            except Exception:
+                is_dark_theme = True  # sensible fallback matching this app's default palette
+            chart_text_color = "white" if is_dark_theme else "#1F2937"
             chart_col1, chart_col2 = st.columns(2)
 
             with chart_col1:
@@ -196,7 +236,7 @@ if run_button:
                 labels = [f"Equity ({weights[0]:.0%})", f"Debt ({weights[1]:.0%})"]
                 ax1.pie(weights, labels=labels, colors=["#5B8DEF", "#C9A227"],
                         wedgeprops=dict(width=0.42), startangle=90,
-                        textprops={"color": "white", "fontsize": 9})
+                        textprops={"color": chart_text_color, "fontsize": 9, "weight": "medium"})
                 # Streamlit deprecated passing savefig kwargs (like transparent=True)
                 # straight through st.pyplot() - the currently-recommended pattern is
                 # to save to an in-memory buffer ourselves and render with st.image().
@@ -222,7 +262,7 @@ if run_button:
                         ax2.patch.set_alpha(0)
                         ax2.pie(nonzero_counts, labels=nonzero_labels, colors=nonzero_colors,
                                 wedgeprops=dict(width=0.42), startangle=90,
-                                textprops={"color": "white", "fontsize": 9})
+                                textprops={"color": chart_text_color, "fontsize": 9, "weight": "medium"})
                         buf2 = io.BytesIO()
                         fig2.savefig(buf2, format="png", transparent=True, dpi=150, bbox_inches="tight")
                         st.image(buf2)
@@ -351,15 +391,19 @@ if run_button:
                     excel_bytes = f.read()
 
         st.success("Analysis complete.")
-        st.download_button(
+        # Fill the placeholder reserved near the top of the page, right
+        # after the headline metrics - not a new button here, this call
+        # updates that earlier-reserved slot so the button visually appears
+        # up top, even though the file itself was only just finished building.
+        top_download_placeholder.download_button(
             "Download Full Excel Workbook",
             data=excel_bytes,
             file_name=f"{ticker}_dcf_output.xlsx",
             mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
             use_container_width=True,
-            type="primary",  # solid, colored button - matches "Run Analysis" prominence,
-                              # instead of the faint default outline style
-            icon="\U0001F4E5",  # 📥 - a visual cue this is a download action
+            type="primary",
+            icon=":material/download:",  # clean line icon instead of a colorful emoji -
+                                          # reads more professional next to a navy/gold financial tool
         )
 
     except Exception as e:
