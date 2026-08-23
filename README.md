@@ -4,6 +4,28 @@ A Python tool that pulls live financial data for any public company, builds an a
 
 Built as a portfolio project to apply valuation work from my investment internship (BNP Paribas Fortis) in a reproducible, auditable, code-based form — rather than a one-off Excel file.
 
+![Streamlit app screenshot](screenshots/streamlit_app.png)
+*The Streamlit interface: rule-based valuation rating, live price history, capital structure and analyst recommendation breakdowns, all built on the same tested pipeline as the command-line tools and Excel export.*
+
+<details>
+<summary><b>More screenshots: the Excel workbook</b> (click to expand)</summary>
+
+**Live DCF sheet** — every blue cell is a real, editable Excel formula. Change WACC and every downstream number recalculates instantly, no Python required:
+
+![Live DCF sheet](screenshots/excel_live_dcf.png)
+
+**Football Field chart** — DCF, comps (EV/EBITDA and P/E), and analyst target ranges compared side by side in one visual:
+
+![Football Field chart](screenshots/excel_football_field.png)
+
+**Monte Carlo simulation** — 2,000 randomized DCF runs, showing a full distribution of outcomes instead of one point estimate:
+
+![Monte Carlo histogram](screenshots/excel_monte_carlo.png)
+
+**Want to explore a real workbook yourself?** [`examples/MSFT_dcf_output_sample.xlsx`](examples/MSFT_dcf_output_sample.xlsx) is a real, complete output from this tool - a static snapshot (not live-updating; run the tool yourself for current data), included so the live formulas, charts, and conditional formatting can be explored hands-on rather than only viewed as static images.
+
+</details>
+
 ## What it does
 
 1. Pulls historical financial statements (income statement, balance sheet, cash flow) for a given ticker via [yfinance](https://github.com/ranaroussi/yfinance)
