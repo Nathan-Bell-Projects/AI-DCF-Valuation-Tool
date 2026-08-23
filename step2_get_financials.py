@@ -83,6 +83,35 @@ def get_dcf_inputs(ticker: str) -> pd.DataFrame:
     return df
 
 
+def check_currency_mismatch(stock_info: dict) -> dict:
+    """yfinance separates a company's TRADING currency (what the stock price
+    is quoted in, e.g. USD for a US-listed ADR) from its FINANCIAL currency
+    (what the underlying financial statements are reported in, e.g. JPY for
+    Sony Group). When these differ, the DCF's enterprise/equity value is
+    calculated in one currency and then divided by a share count implicitly
+    tied to the other - producing a wildly wrong implied price with no
+    error, no crash, just a silently nonsensical number.
+
+    This was found in exactly this form when testing SONY: implied price
+    came back at 25,000%+ "upside" versus the real market price, because
+    revenue/EBIT were in JPY while shares outstanding/current price were
+    USD-based. Unlike the REIT negative-price case (a genuine methodology
+    mismatch), this is a pure unit error - the fix is to detect and warn,
+    not to explain away."""
+    trading_currency = stock_info.get("currency")
+    financial_currency = stock_info.get("financialCurrency")
+    mismatch = (
+        trading_currency is not None
+        and financial_currency is not None
+        and trading_currency != financial_currency
+    )
+    return {
+        "mismatch": mismatch,
+        "trading_currency": trading_currency,
+        "financial_currency": financial_currency,
+    }
+
+
 if __name__ == "__main__":
     ticker = "MSFT"
     print(f"Pulling financial data for {ticker}...\n")

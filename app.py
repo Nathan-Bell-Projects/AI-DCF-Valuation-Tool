@@ -11,16 +11,19 @@ Run with: streamlit run app.py
 """
 
 import os
+import io
 import tempfile
 import streamlit as st
 import yfinance as yf
+import matplotlib.pyplot as plt
 
-from step2_get_financials import get_dcf_inputs
+from step2_get_financials import get_dcf_inputs, check_currency_mismatch
 from step3_dcf_engine import run_dcf_scenario
 from step4_sensitivity import build_sensitivity_table
 from step5_excel_export import export_to_excel
 from analyst_data import get_analyst_data
 from capm_wacc import compute_capm_wacc
+from step6_ai_summary import compute_valuation_rating
 from config import DEFAULT_WACC, DEFAULT_TERMINAL_GROWTH, DEFAULT_SENSITIVITY_WACC_RANGE, DEFAULT_SENSITIVITY_GROWTH_RANGE
 
 st.set_page_config(page_title="AI-Assisted DCF Valuation Tool", layout="wide")
@@ -93,6 +96,22 @@ if run_button:
             st.error(f"Couldn't pull required data for '{ticker}' - check the ticker is valid.")
             st.stop()
 
+        currency_check = check_currency_mismatch(stock_info)
+        if currency_check["mismatch"]:
+            st.error(
+                f"**Currency mismatch detected for {ticker}.** This stock trades in "
+                f"**{currency_check['trading_currency']}**, but its underlying financial "
+                f"statements are reported in **{currency_check['financial_currency']}**. "
+                f"A common situation for non-US companies with a US-listed ADR (e.g. Sony, "
+                f"Toyota). This tool doesn't perform currency conversion, so the DCF's "
+                f"enterprise/equity value (calculated from {currency_check['financial_currency']}"
+                f"-denominated financials) can't be safely divided by a "
+                f"{currency_check['trading_currency']}-based share count - the result would be "
+                f"a meaningless number, not just an inaccurate one. Try a company that reports "
+                f"in the same currency it trades in (e.g. most US-domiciled companies)."
+            )
+            st.stop()
+
         overrides = {"avg_capex_pct_revenue": capex_override} if capex_override is not None else None
 
         latest_year = sorted(df.dropna(axis=1, how="all").columns)[-1]
@@ -109,13 +128,46 @@ if run_button:
             result = scenario["result"]
 
         gap_pct = result["implied_share_price"] / current_price - 1
+        rating = compute_valuation_rating(gap_pct)  # free, rule-based - no API key needed
 
-        # --- Headline metrics ---
-        st.subheader(f"{company_name} ({ticker})")
-        m1, m2, m3 = st.columns(3)
-        m1.metric("Current Price", f"${current_price:,.2f}")
-        m2.metric("Implied Price (DCF)", f"${result['implied_share_price']:,.2f}")
-        m3.metric("Upside / (Downside)", f"{gap_pct:+.1%}")
+        # --- Headline metrics, in a bordered card for visual grouping ---
+        with st.container(border=True):
+            st.subheader(f"{company_name} ({ticker})")
+            # Using color instead of the filled/empty star glyph distinction -
+            # the outline star character (U+2606) renders visually almost
+            # identical to the filled one (U+2605) in Streamlit's bold header
+            # font, making "1 star" look like "5 stars" at a glance. Solid
+            # gold vs. dim grey stars removes that ambiguity entirely.
+            filled_stars = "\u2605" * rating["stars"]
+            empty_stars = "\u2605" * (5 - rating["stars"])
+            stars_html = (
+                f'<span style="color:#C9A227; font-size:1.4rem;">{filled_stars}</span>'
+                f'<span style="color:#3A4356; font-size:1.4rem;">{empty_stars}</span>'
+            )
+            st.markdown(f"#### {stars_html}  {rating['label']}", unsafe_allow_html=True)
+            m1, m2, m3 = st.columns(3)
+            m1.metric("Current Price", f"${current_price:,.2f}")
+            m2.metric("Implied Price (DCF)", f"${result['implied_share_price']:,.2f}")
+            # Positive gap = DCF implies the stock is worth MORE than the
+            # current price (undervalued signal) - Streamlit's default
+            # "normal" delta coloring (positive=green) already matches this
+            # correctly, no need to invert it.
+            m3.metric("Upside / (Downside)", f"{gap_pct:+.1%}", delta=f"{gap_pct:+.1%}")
+            st.caption("Rating reflects ONLY this model's own DCF, using conservative "
+                       "historical-median assumptions - see Cover sheet in the Excel export "
+                       "for the full disclaimer.")
+
+        with st.spinner("Pulling price history..."):
+            try:
+                price_history = yf.Ticker(ticker).history(period="1y")["Close"]
+                if len(price_history) > 0:
+                    # Resample to weekly - a full year of daily closes crams
+                    # ~250 x-axis labels into the chart, making them
+                    # unreadable. Weekly keeps the trend clear with a clean axis.
+                    price_history_weekly = price_history.resample("W").last()
+                    st.line_chart(price_history_weekly, use_container_width=True, color="#5B8DEF")
+            except Exception:
+                pass  # price history is a nice-to-have, never block the rest of the analysis on it
 
         with st.spinner("Building sensitivity table..."):
             sensitivity_df = build_sensitivity_table(
@@ -129,19 +181,96 @@ if run_button:
 
         with st.spinner("Pulling analyst insights..."):
             analyst_info = get_analyst_data(ticker)
+
+        # --- Donut charts: capital structure + analyst recommendations ---
+        with st.container(border=True):
+            st.markdown("##### Valuation Composition")
+            chart_col1, chart_col2 = st.columns(2)
+
+            with chart_col1:
+                st.caption("Capital Structure (Market Value)")
+                fig1, ax1 = plt.subplots(figsize=(3, 3))
+                fig1.patch.set_alpha(0)   # fully transparent - blends into the page background
+                ax1.patch.set_alpha(0)
+                weights = [capm_info["weight_equity"], capm_info["weight_debt"]]
+                labels = [f"Equity ({weights[0]:.0%})", f"Debt ({weights[1]:.0%})"]
+                ax1.pie(weights, labels=labels, colors=["#5B8DEF", "#C9A227"],
+                        wedgeprops=dict(width=0.42), startangle=90,
+                        textprops={"color": "white", "fontsize": 9})
+                # Streamlit deprecated passing savefig kwargs (like transparent=True)
+                # straight through st.pyplot() - the currently-recommended pattern is
+                # to save to an in-memory buffer ourselves and render with st.image().
+                buf1 = io.BytesIO()
+                fig1.savefig(buf1, format="png", transparent=True, dpi=150, bbox_inches="tight")
+                st.image(buf1)
+
+            with chart_col2:
+                recs = analyst_info.get("recommendations")
+                if recs is not None and len(recs) > 0:
+                    st.caption("Analyst Recommendations")
+                    latest = recs.iloc[0]
+                    categories = ["Strong Buy", "Buy", "Hold", "Sell", "Strong Sell"]
+                    keys = ["strongBuy", "buy", "hold", "sell", "strongSell"]
+                    counts = [int(latest.get(k, 0)) for k in keys]
+                    colors = ["#2E7D32", "#5B8DEF", "#C9A227", "#B45309", "#B91C1C"]
+                    nonzero_labels = [f"{c} ({v})" for c, v in zip(categories, counts) if v > 0]
+                    nonzero_counts = [v for v in counts if v > 0]
+                    nonzero_colors = [c for c, v in zip(colors, counts) if v > 0]
+                    if nonzero_counts:
+                        fig2, ax2 = plt.subplots(figsize=(3, 3))
+                        fig2.patch.set_alpha(0)
+                        ax2.patch.set_alpha(0)
+                        ax2.pie(nonzero_counts, labels=nonzero_labels, colors=nonzero_colors,
+                                wedgeprops=dict(width=0.42), startangle=90,
+                                textprops={"color": "white", "fontsize": 9})
+                        buf2 = io.BytesIO()
+                        fig2.savefig(buf2, format="png", transparent=True, dpi=150, bbox_inches="tight")
+                        st.image(buf2)
+
             if analyst_info.get("price_targets"):
-                st.subheader("Analyst Consensus")
+                st.divider()
+                st.caption("Analyst Consensus")
                 targets = analyst_info["price_targets"]
                 a1, a2, a3 = st.columns(3)
                 a1.metric("Analyst Low", f"${targets.get('low', 0):,.2f}")
                 a2.metric("Analyst Mean", f"${targets.get('mean', 0):,.2f}")
                 a3.metric("Analyst High", f"${targets.get('high', 0):,.2f}")
 
-        st.subheader("5-Year Forecast")
-        st.dataframe(forecast_df.round(0), use_container_width=True)
+        # --- Forecast & sensitivity, grouped together ---
+        with st.container(border=True):
+            st.markdown("##### 5-Year Forecast")
+            # Display in $ millions with comma separators - raw dollar figures
+            # (hundreds of billions for a company like MSFT) are unreadable as
+            # plain numbers. Pre-formatting as strings here (rather than relying
+            # on a Streamlit NumberColumn format flag for comma-grouping, which
+            # isn't guaranteed to behave the same across versions) means the
+            # exact displayed text can be verified directly, not assumed.
+            display_forecast_df = forecast_df.copy()
+            for col in display_forecast_df.columns:
+                if col != "Year":
+                    display_forecast_df[col] = (display_forecast_df[col] / 1_000_000).apply(
+                        lambda v: f"${v:,.0f}"
+                    )
+            display_forecast_df = display_forecast_df.rename(
+                columns={col: f"{col} ($M)" for col in display_forecast_df.columns if col != "Year"}
+            )
+            st.dataframe(display_forecast_df, use_container_width=True)
 
-        st.subheader("WACC / Terminal Growth Sensitivity")
-        st.dataframe(sensitivity_df.round(2), use_container_width=True)
+            st.markdown("##### WACC / Terminal Growth Sensitivity")
+            st.caption("Colored red-to-green from lowest to highest implied price - matches the "
+                       "conditional formatting in the downloaded Excel workbook.")
+            # Red-yellow-green heatmap via pandas Styler, matching the Excel
+            # sensitivity sheet's conditional formatting - keeps the two
+            # outputs visually consistent rather than looking like different
+            # tools. background_gradient works on the numeric data; .format()
+            # controls the DISPLAYED text without altering the underlying
+            # values used for the color scale.
+            styled_sensitivity = (
+                sensitivity_df.style
+                .background_gradient(cmap="RdYlGn", axis=None)
+                .format("${:,.2f}")
+            )
+            st.dataframe(styled_sensitivity, use_container_width=True)
 
         scenarios = [{
             "label": "Base case", "capex_label": "Historical median" if capex_override is None else f"{capex_override:.0%}",
@@ -228,6 +357,9 @@ if run_button:
             file_name=f"{ticker}_dcf_output.xlsx",
             mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
             use_container_width=True,
+            type="primary",  # solid, colored button - matches "Run Analysis" prominence,
+                              # instead of the faint default outline style
+            icon="\U0001F4E5",  # 📥 - a visual cue this is a download action
         )
 
     except Exception as e:

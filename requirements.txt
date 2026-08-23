@@ -4,3 +4,4 @@ openpyxl
 anthropic
 numpy
 streamlit
+matplotlib
