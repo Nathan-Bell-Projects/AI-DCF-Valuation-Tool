@@ -13,6 +13,7 @@ supports - if the data doesn't clearly explain the gap, it should say so.
 """
 
 import os
+import pandas as pd
 from anthropic import Anthropic
 
 
@@ -59,9 +60,48 @@ def gather_context(ticker: str, df, assumptions: dict, result: dict,
         "recommendation_breakdown": None,
         "recommendation_trend_note": None,
         "target_price_range": None,
+        # New: real "current state of the company" signals - earnings
+        # beat/miss history and price momentum. Grounds the AI's commentary
+        # in more than trailing-4-year financial statements, WITHOUT
+        # opening the door to free-form narrative about the company - these
+        # are still specific, real, structured numbers the AI can only
+        # reason from, not invent around.
+        "earnings_surprise_note": None,
+        "price_momentum_note": None,
     }
 
     if analyst_info:
+        earnings = analyst_info.get("earnings_surprises")
+        if earnings is not None and len(earnings) > 0:
+            recent = earnings.iloc[0]
+            surprise_col = "Surprise(%)" if "Surprise(%)" in earnings.columns else None
+            if surprise_col and pd.notna(recent.get(surprise_col)):
+                beat_or_miss = "beat" if recent[surprise_col] > 0 else "missed"
+                context["earnings_surprise_note"] = (
+                    f"Most recent quarter {beat_or_miss} EPS estimates by {abs(recent[surprise_col]):.1f}% "
+                    f"(estimate ${recent.get('EPS Estimate', 0):.2f}, actual ${recent.get('Reported EPS', 0):.2f})"
+                )
+                # Note the trend across however many recent quarters are available,
+                # not just the single most recent one
+                if len(earnings) >= 2 and surprise_col:
+                    surprises = earnings[surprise_col].dropna()
+                    if len(surprises) >= 2:
+                        beat_count = (surprises > 0).sum()
+                        context["earnings_surprise_note"] += (
+                            f". Beat estimates in {beat_count} of the last {len(surprises)} reported quarters"
+                        )
+
+        momentum = analyst_info.get("price_momentum")
+        if momentum:
+            parts = []
+            if momentum.get("change_1mo") is not None:
+                parts.append(f"1-month: {momentum['change_1mo']:+.1%}")
+            if momentum.get("change_3mo") is not None:
+                parts.append(f"3-month: {momentum['change_3mo']:+.1%}")
+            if momentum.get("change_6mo") is not None:
+                parts.append(f"6-month: {momentum['change_6mo']:+.1%}")
+            if parts:
+                context["price_momentum_note"] = "Price change - " + ", ".join(parts)
         targets = analyst_info.get("price_targets")
         if targets:
             context["target_price_range"] = (
@@ -129,7 +169,13 @@ Write a 6-8 sentence plain-English explanation covering:
    the price target range suggest confidence or wide disagreement among analysts.
    Only reason from the specific data given - if nothing in the data clearly
    explains analyst sentiment, say so rather than guessing.
-4. Close with one sentence putting this in context for the reader (e.g. what
+4. If earnings surprise history and/or price momentum data are available below,
+   briefly note what they show (e.g. a recent earnings beat, or strong/weak
+   recent price momentum) as additional real, current-state context - but do
+   NOT use this as license to speculate about WHY (no invented reasons like
+   specific product launches or management decisions unless that information
+   is explicitly given below, which it currently is not).
+5. Close with one sentence putting this in context for the reader (e.g. what
    would need to be true for the model's view vs. the market's view to be right).
 
 CRITICAL RULES:
@@ -178,6 +224,8 @@ DATA:
 - Analyst consensus recommendation: {context['analyst_recommendation'] or "Not available"}
 - Analyst recommendation breakdown (most recent period): {context['recommendation_breakdown'] or "Not available"}
 - Recommendation trend: {context['recommendation_trend_note'] or "Not available / no significant change"}
+- Recent earnings surprise history: {context['earnings_surprise_note'] or "Not available"}
+- Recent price momentum: {context['price_momentum_note'] or "Not available"}
 
 Write the explanation now, as plain prose (no headers, no bullet points)."""
 
@@ -194,7 +242,7 @@ def generate_gap_explanation(ticker: str, df, assumptions: dict, result: dict,
     client = Anthropic()  # reads ANTHROPIC_API_KEY from environment
     response = client.messages.create(
         model="claude-sonnet-4-5",
-        max_tokens=650,
+        max_tokens=750,
         messages=[{"role": "user", "content": prompt}],
     )
     return {

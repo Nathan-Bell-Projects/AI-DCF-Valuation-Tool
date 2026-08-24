@@ -50,6 +50,7 @@ with st.sidebar:
 
     st.divider()
     st.subheader("Optional add-ons (all free, no API key)")
+    include_scenarios = st.checkbox("Management Assumptions (Base/Upside/Downside)")
     include_peers = st.checkbox("Comps valuation + Football Field chart")
     peers_input = ""
     if include_peers:
@@ -346,6 +347,22 @@ if run_button:
                 prob = float((monte_carlo_info["prices"] > current_price).mean())
                 mc3.metric("Prob. DCF Exceeds Market Price", f"{prob:.1%}")
 
+        mgmt_scenario_results = None
+        if include_scenarios:
+            with st.spinner("Building Base/Upside/Downside scenarios from real historical data..."):
+                from scenario_planning import run_scenario_valuations
+                mgmt_scenario_results = run_scenario_valuations(
+                    df, cash=cash, total_debt=total_debt, shares_outstanding=shares_outstanding,
+                    wacc=wacc, terminal_growth=terminal_growth,
+                )
+                st.subheader("Management Assumptions: Base / Upside / Downside")
+                st.caption("Upside/Downside are this company's own real best/worst historical years - "
+                           "not fabricated percentages.")
+                s1, s2, s3 = st.columns(3)
+                s1.metric("Downside", f"${mgmt_scenario_results['downside']['implied_price']:,.2f}")
+                s2.metric("Base", f"${mgmt_scenario_results['base']['implied_price']:,.2f}")
+                s3.metric("Upside", f"${mgmt_scenario_results['upside']['implied_price']:,.2f}")
+
         backtest_info = None
         if include_backtest:
             with st.spinner("Running backtest..."):
@@ -384,6 +401,7 @@ if run_button:
                     scenarios=scenarios, ai_output=ai_output, gap_pct=gap_pct,
                     analyst_info=analyst_info, capm_info=capm_info, comps_info=comps_info,
                     monte_carlo_info=monte_carlo_info, backtest_info=backtest_info,
+                    scenario_results=mgmt_scenario_results,
                     wacc=wacc, terminal_growth=terminal_growth,
                     output_path=output_path,
                 )

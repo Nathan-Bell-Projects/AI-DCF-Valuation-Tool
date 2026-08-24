@@ -1,8 +1,8 @@
-# AI-Assisted DCF Valuation Tool
+# Financial Forecasting & Scenario Planning Engine
 
-A Python tool that pulls live financial data for any public company, builds an automated discounted cash flow (DCF) valuation, tests that valuation's sensitivity to key assumptions, and exports everything into a polished Excel workbook.
+A Python tool that pulls live financial data for any public company, builds a driver-based 5-year forecast, and stress-tests it through multiple lenses - scenario planning, valuation, Monte Carlo simulation, and forecast-accuracy backtesting - before exporting everything into a polished Excel workbook. Valuation (DCF, comps) is one output of the underlying forecast, not the sole purpose of the tool.
 
-Built as a portfolio project to apply valuation work from my investment internship (BNP Paribas Fortis) in a reproducible, auditable, code-based form — rather than a one-off Excel file.
+Built as a portfolio project applying analysis work from my investment internship (BNP Paribas Fortis) in a reproducible, auditable, code-based form - rather than a one-off Excel file. The core design principle: historical data is a **starting point for judgment**, not automatically the forecast itself - the Management Assumptions sheet makes this explicit, deriving Base/Upside/Downside cases from the company's own real historical range rather than a single fixed projection.
 
 ![Streamlit app screenshot](screenshots/streamlit_app.png)
 *The Streamlit interface: rule-based valuation rating, live price history, capital structure and analyst recommendation breakdowns, all built on the same tested pipeline as the command-line tools and Excel export.*
@@ -29,17 +29,18 @@ Built as a portfolio project to apply valuation work from my investment internsh
 ## What it does
 
 1. Pulls historical financial statements (income statement, balance sheet, cash flow) for a given ticker via [yfinance](https://github.com/ranaroussi/yfinance)
-2. Derives forecast assumptions (revenue growth, EBIT margin, capex, D&A, net working capital) from historical medians
-3. Forecasts 5 years of unlevered free cash flow
-4. Discounts those cash flows to a present value using a chosen WACC, with a Gordon Growth terminal value
-5. Bridges Enterprise Value → Equity Value → implied share price
-6. Runs a WACC / terminal growth sensitivity grid
-7. Pulls independent analyst price targets, recommendation trends, and recent rating actions (free, no API key)
-8. Runs a comparable-company (comps) valuation - EV/EBITDA and P/E multiples vs. user-specified peers - as a second, independent valuation method alongside the DCF (free, no API key)
-9. Runs a Monte Carlo simulation (thousands of randomized DCF runs) to show a full probability distribution of outcomes instead of one point estimate - the quantitative version of Morningstar's Uncertainty Rating concept (free, no API key)
-10. Backtests the core assumption methodology itself - does historical-median growth/margin actually predict what happens next? Uses leave-future-out validation against the company's own real history (free, no API key)
-11. Exports a multi-sheet Excel workbook: Cover, Summary, Live DCF, Analyst Insights, AI Valuation Summary (optional), Comps Valuation (optional), Football Field chart (optional), Monte Carlo (optional), Backtest (optional), DCF Forecast, Sensitivity, and Scenario Comparison
-12. Provides a Streamlit UI as an alternative to the command-line interface
+2. Derives Base case forecast assumptions (revenue growth, EBIT margin, capex, D&A, net working capital) from historical medians - treated as a **starting point**, not the final answer
+3. Builds **Base / Upside / Downside scenarios**, where Upside and Downside are the company's own actual best and worst historical years on each metric - not fabricated percentages, so every number in every scenario is something that really happened (free, no API key)
+4. Forecasts 5 years of unlevered free cash flow under each scenario
+5. Discounts those cash flows to a present value using a chosen WACC, with a Gordon Growth terminal value
+6. Bridges Enterprise Value → Equity Value → implied share price
+7. Runs a WACC / terminal growth sensitivity grid
+8. Pulls independent analyst price targets, recommendation trends, and recent rating actions (free, no API key)
+9. Runs a comparable-company (comps) valuation - EV/EBITDA and P/E multiples vs. user-specified peers - as a second, independent method alongside the DCF (free, no API key)
+10. Runs a Monte Carlo simulation (thousands of randomized DCF runs) to show a full probability distribution of outcomes instead of one point estimate - the quantitative version of Morningstar's Uncertainty Rating concept (free, no API key)
+11. Backtests the forecast methodology itself - does historical-median growth/margin actually predict what happens next? Uses leave-future-out validation against the company's own real history, the same technique used to evaluate forecast accuracy in FP&A (free, no API key)
+12. Exports a multi-sheet Excel workbook: Cover, Summary, Live DCF, Management Assumptions, Analyst Insights, AI Valuation Summary (optional), Comps Valuation (optional), Football Field chart (optional), Monte Carlo (optional), Backtest (optional), DCF Forecast, Sensitivity, and Scenario Comparison
+13. Provides a Streamlit UI as an alternative to the command-line interface, [deployed live](https://bellekens-valuation.streamlit.app) - try it without installing anything
 
 ## Example output: Microsoft (MSFT)
 
@@ -55,6 +56,7 @@ Built as a portfolio project to apply valuation work from my investment internsh
 
 ## Methodology notes & known simplifications
 
+- **Base/Upside/Downside scenarios are derived from real historical data, not fabricated assumptions.** Upside uses this company's own best historical year on each metric (highest growth/margin, lowest capex intensity); Downside uses its own worst year. This was a deliberate design choice: an earlier idea considered letting users upload a fictional "company budget" for demo purposes, which was rejected specifically because it would have undermined this project's core strength - every number, in every mode, is real and verifiable. All three scenarios use the same WACC and terminal growth, isolating the effect of the operating assumptions themselves rather than conflating multiple changing variables at once.
 - **Median, not mean, for historical assumptions.** A single anomalous year (like the 2026 capex spike) skews a mean far more than a median.
 - **Net working capital is included** (Current Assets − Cash) − Current Liabilities, forecast as a constant % of revenue, with the *change* in NWC subtracted from FCF each year. This was added after benchmarking against a Corporate Finance Institute DCF template, which flagged it as a standard adjustment an earlier version of this tool was missing.
 - **Assumptions are overridable via command-line arguments** (`--capex-override`, `--wacc`, `--terminal-growth`), not hardcoded, so every judgment call is explicit and auditable rather than silently baked in.
@@ -128,6 +130,9 @@ python3 step5_excel_export.py --ticker MSFT --monte-carlo 2000
 # Add a backtest of the assumption methodology itself - free, no API key needed
 python3 step5_excel_export.py --ticker MSFT --backtest
 
+# Add Base/Upside/Downside Management Assumptions, derived from real historical best/worst years - free, no API key needed
+python3 step5_excel_export.py --ticker MSFT --scenarios
+
 # AI-generated explanation of the implied-vs-market price gap - REQUIRES your own ANTHROPIC_API_KEY
 python3 step6_ai_summary.py --ticker MSFT
 ```
@@ -145,6 +150,7 @@ analyst_data.py            # Free analyst price targets, recommendations, rating
 comps_valuation.py         # EV/EBITDA and P/E comps valuation vs. user-specified peers (no API key)
 monte_carlo.py             # Monte Carlo simulation of DCF outcomes (no API key)
 backtest.py                # Tests whether historical-median assumptions actually predict outcomes (no API key)
+scenario_planning.py       # Base/Upside/Downside from real historical best/worst years (no API key)
 capm_wacc.py               # CAPM-based suggested WACC calculation (no API key)
 config.py                  # Shared default constants (tax rate, WACC, ERP, sensitivity ranges)
 app.py                     # Streamlit UI - thin wrapper over the same tested functions, no new logic

@@ -137,9 +137,9 @@ def build_cover_sheet(ws, ticker: str, company_name: str):
     for c in range(1, 9):
         ws.cell(row=r, column=c).fill = SECTION_FILL
     r += 1
-    for label in ["Summary", "Live DCF (Editable)", "Analyst Insights", "AI Valuation Summary",
-                  "Comps Valuation", "Football Field", "Monte Carlo", "Backtest", "DCF Forecast",
-                  "Sensitivity", "Scenarios"]:
+    for label in ["Summary", "Live DCF (Editable)", "Management Assumptions", "Analyst Insights",
+                  "AI Valuation Summary", "Comps & Football Field", "Model Validation",
+                  "DCF Forecast", "Sensitivity & Scenarios"]:
         ws.cell(row=r, column=1, value=f"\u2022  {label}").font = BODY_FONT
         r += 1
     r += 1
@@ -357,60 +357,42 @@ def build_forecast_sheet(ws, ticker, company_name, forecast_df: pd.DataFrame):
 # ---------------------------------------------------------------
 # Sensitivity sheet
 # ---------------------------------------------------------------
-def build_sensitivity_sheet(ws, ticker, company_name, sensitivity_df: pd.DataFrame, current_price: float):
-    _draw_banner(ws, f"{ticker} \u2014 Sensitivity: Implied Price by WACC / Terminal Growth", company_name)
+def build_sensitivity_and_scenarios_sheet(ws, ticker, company_name, scenarios: list,
+                                             sensitivity_df: pd.DataFrame, current_price: float):
+    """Merged sheet: named scenario comparison (a handful of specific,
+    labeled judgment calls) sits above the full WACC/growth sensitivity
+    grid (every combination, heatmapped) - they were two separate sheets
+    covering overlapping ground (the named scenarios are themselves points
+    that exist inside the full grid), consolidated after review found the
+    workbook had grown to too many thin, single-purpose sheets."""
+    _draw_banner(ws, f"{ticker} \u2014 Sensitivity & Scenarios", company_name)
 
-    ws.cell(row=4, column=1, value=f"Current market price: ${current_price:,.2f}").font = LABEL_FONT
+    r = 4
+    ws.cell(row=r, column=1, value=f"Current market price: ${current_price:,.2f}").font = LABEL_FONT
+    r += 2
 
-    start_row = 6
-    ws.cell(row=start_row, column=1, value="WACC \\ Growth").font = HEADER_FONT
-    for col_num, growth in enumerate(sensitivity_df.columns, start=2):
-        ws.cell(row=start_row, column=col_num, value=f"{growth:.1%}")
-    _style_header_row(ws, start_row, len(sensitivity_df.columns) + 1)
-
-    for row_offset, (wacc, row) in enumerate(sensitivity_df.iterrows(), start=1):
-        r = start_row + row_offset
-        ws.cell(row=r, column=1, value=f"{wacc:.1%}").font = LABEL_FONT
-        for col_offset, value in enumerate(row, start=2):
-            cell = ws.cell(row=r, column=col_offset, value=value)
-            cell.number_format = "$#,##0.00"
-            cell.font = BODY_FONT
-            cell.border = THIN_BORDER
-
-    last_col_letter = get_column_letter(1 + len(sensitivity_df.columns))
-    data_range = f"B{start_row + 1}:{last_col_letter}{start_row + len(sensitivity_df)}"
-    rule = ColorScaleRule(
-        start_type="min", start_color="F8696B",
-        mid_type="percentile", mid_value=50, mid_color="FFEB84",
-        end_type="max", end_color="63BE7B",
-    )
-    ws.conditional_formatting.add(data_range, rule)
-
-    _autofit_columns(ws)
-
-
-# ---------------------------------------------------------------
-# Scenario Comparison sheet
-# ---------------------------------------------------------------
-def build_scenario_sheet(ws, ticker, company_name, scenarios: list):
-    _draw_banner(ws, f"{ticker} \u2014 Scenario Comparison", company_name)
-
-    ws.cell(row=4, column=1,
+    # --- Section 1: Named Scenarios ---
+    ws.cell(row=r, column=1, value="Named Scenarios").font = SECTION_FONT
+    for c in range(1, 6):
+        ws.cell(row=r, column=c).fill = SECTION_FILL
+    r += 1
+    ws.cell(row=r, column=1,
             value="Base case uses unadjusted historical median assumptions - the most defensible, "
                   "non-circular estimate. Scenarios below show sensitivity to specific, named judgment calls.")
-    ws.cell(row=4, column=1).font = DISCLAIMER_FONT
-    ws.cell(row=4, column=1).alignment = Alignment(wrap_text=True)
-    ws.merge_cells("A4:E4")
-    ws.row_dimensions[4].height = 32
+    ws.cell(row=r, column=1).font = DISCLAIMER_FONT
+    ws.cell(row=r, column=1).alignment = Alignment(wrap_text=True)
+    ws.merge_cells(start_row=r, start_column=1, end_row=r, end_column=5)
+    ws.row_dimensions[r].height = 32
+    r += 2
 
     headers = ["Scenario", "Capex Assumption", "WACC", "Terminal Growth", "Implied Share Price"]
-    start_row = 6
+    scenario_header_row = r
     for col_num, header in enumerate(headers, start=1):
-        ws.cell(row=start_row, column=col_num, value=header)
-    _style_header_row(ws, start_row, len(headers))
+        ws.cell(row=scenario_header_row, column=col_num, value=header)
+    _style_header_row(ws, scenario_header_row, len(headers))
+    r += 1
 
-    for i, sc in enumerate(scenarios, start=1):
-        r = start_row + i
+    for sc in scenarios:
         ws.cell(row=r, column=1, value=sc["label"]).font = BODY_FONT
         ws.cell(row=r, column=2, value=sc.get("capex_label", "Historical median")).font = BODY_FONT
         ws.cell(row=r, column=3, value=sc["wacc"]).number_format = "0.0%"
@@ -420,6 +402,38 @@ def build_scenario_sheet(ws, ticker, company_name, scenarios: list):
         for c in range(1, 6):
             ws.cell(row=r, column=c).border = THIN_BORDER
             ws.cell(row=r, column=c).font = BODY_FONT
+        r += 1
+    r += 2
+
+    # --- Section 2: Full Sensitivity Grid ---
+    ws.cell(row=r, column=1, value="WACC / Terminal Growth Sensitivity Grid").font = SECTION_FONT
+    for c in range(1, 1 + len(sensitivity_df.columns) + 1):
+        ws.cell(row=r, column=c).fill = SECTION_FILL
+    r += 2
+
+    grid_header_row = r
+    ws.cell(row=grid_header_row, column=1, value="WACC \\ Growth").font = HEADER_FONT
+    for col_num, growth in enumerate(sensitivity_df.columns, start=2):
+        ws.cell(row=grid_header_row, column=col_num, value=f"{growth:.1%}")
+    _style_header_row(ws, grid_header_row, len(sensitivity_df.columns) + 1)
+
+    for row_offset, (wacc, row) in enumerate(sensitivity_df.iterrows(), start=1):
+        rr = grid_header_row + row_offset
+        ws.cell(row=rr, column=1, value=f"{wacc:.1%}").font = LABEL_FONT
+        for col_offset, value in enumerate(row, start=2):
+            cell = ws.cell(row=rr, column=col_offset, value=value)
+            cell.number_format = "$#,##0.00"
+            cell.font = BODY_FONT
+            cell.border = THIN_BORDER
+
+    last_col_letter = get_column_letter(1 + len(sensitivity_df.columns))
+    data_range = f"B{grid_header_row + 1}:{last_col_letter}{grid_header_row + len(sensitivity_df)}"
+    rule = ColorScaleRule(
+        start_type="min", start_color="F8696B",
+        mid_type="percentile", mid_value=50, mid_color="FFEB84",
+        end_type="max", end_color="63BE7B",
+    )
+    ws.conditional_formatting.add(data_range, rule)
 
     _autofit_columns(ws)
 
@@ -710,8 +724,15 @@ def build_live_dcf_sheet(ws, ticker, company_name, assumptions, cash, total_debt
 from openpyxl.chart import BarChart, Reference
 
 
-def build_comps_sheet(ws, ticker, company_name, comps_info, current_price):
-    _draw_banner(ws, f"{ticker} \u2014 Comparable Company Analysis", company_name)
+def build_comps_and_football_field_sheet(ws, ticker, company_name, comps_info, dcf_low, dcf_high,
+                                            analyst_info, current_price):
+    """Merged sheet: comps peer comparison + implied prices sits above the
+    football field chart, which visually depends on the comps numbers just
+    above it - these were two separate sheets that read as one continuous
+    idea anyway (comps data feeding directly into the comparison chart),
+    consolidated after review found the workbook had grown to too many
+    thin, single-purpose sheets."""
+    _draw_banner(ws, f"{ticker} \u2014 Comps & Football Field", company_name)
 
     r = 4
     ws.cell(row=r, column=1,
@@ -785,9 +806,6 @@ def build_comps_sheet(ws, ticker, company_name, comps_info, current_price):
         r += 1
     r += 1
 
-    ws.cell(row=r, column=1, value=f"Current Market Price: ${current_price:,.2f}").font = LABEL_FONT
-    r += 2
-
     ws.cell(row=r, column=1,
             value="Limitation: peer multiples reflect current market sentiment (including any "
                   "sector-wide optimism or pessimism), not independently-derived fundamentals - "
@@ -797,30 +815,24 @@ def build_comps_sheet(ws, ticker, company_name, comps_info, current_price):
     ws.cell(row=r, column=1).alignment = Alignment(wrap_text=True)
     ws.merge_cells(start_row=r, start_column=1, end_row=r, end_column=6)
     ws.row_dimensions[r].height = 40
+    r += 3
 
-    _autofit_columns(ws)
-
-
-def build_football_field_sheet(ws, ticker, company_name, dcf_low, dcf_high,
-                                  comps_info, analyst_info, current_price):
-    """A horizontal 'floating bar' chart comparing the implied price RANGE
-    from every valuation method built in this project, plus analyst
-    targets and the current market price - all on one chart."""
-    _draw_banner(ws, f"{ticker} \u2014 Football Field", company_name)
-
-    ws.cell(row=4, column=1,
+    # --- Section 2: Football Field chart ---
+    ws.cell(row=r, column=1, value="Football Field: Valuation Range by Method").font = SECTION_FONT
+    for c in range(1, 6):
+        ws.cell(row=r, column=c).fill = SECTION_FILL
+    r += 1
+    ws.cell(row=r, column=1,
             value="Each bar shows the low-to-high implied share price range from one valuation "
-                  "method. The current market price is noted below for reference.")
-    ws.cell(row=4, column=1).font = DISCLAIMER_FONT
-    ws.merge_cells("A4:F4")
-    ws.row_dimensions[4].height = 28
+                  "method. Football field charts are conventionally built as stacked horizontal bars: "
+                  "an invisible base segment (the low value) plus a visible range segment on top.")
+    ws.cell(row=r, column=1).font = DISCLAIMER_FONT
+    ws.cell(row=r, column=1).alignment = Alignment(wrap_text=True)
+    ws.merge_cells(start_row=r, start_column=1, end_row=r, end_column=6)
+    ws.row_dimensions[r].height = 28
+    r += 2
 
-    # Football field charts are conventionally built as STACKED horizontal
-    # bars: an invisible "base" segment (= the low value) plus a visible
-    # "range" segment (= high - low) stacked on top of it - this makes each
-    # bar visually float between its low and high value instead of
-    # starting at 0.
-    header_row = 6
+    header_row = r
     ws.cell(row=header_row, column=1, value="Method")
     ws.cell(row=header_row, column=2, value="Low (base, hidden)")
     ws.cell(row=header_row, column=3, value="Range (High - Low)")
@@ -839,20 +851,20 @@ def build_football_field_sheet(ws, ticker, company_name, dcf_low, dcf_high,
         if targets.get("low") is not None and targets.get("high") is not None:
             methods.append(("Analyst Target Range", targets["low"], targets["high"]))
 
-    r = header_row + 1
-    first_data_row = r
+    rr = header_row + 1
+    first_data_row = rr
     for label, low, high in methods:
         low = low if low is not None else 0
         high = high if high is not None else 0
-        ws.cell(row=r, column=1, value=label).font = LABEL_FONT
-        ws.cell(row=r, column=2, value=low).number_format = "$#,##0"
-        ws.cell(row=r, column=3, value=max(high - low, 0)).number_format = "$#,##0"
-        ws.cell(row=r, column=4, value=low).number_format = "$#,##0"
-        ws.cell(row=r, column=5, value=high).number_format = "$#,##0"
-        r += 1
-    last_data_row = r - 1
+        ws.cell(row=rr, column=1, value=label).font = LABEL_FONT
+        ws.cell(row=rr, column=2, value=low).number_format = "$#,##0"
+        ws.cell(row=rr, column=3, value=max(high - low, 0)).number_format = "$#,##0"
+        ws.cell(row=rr, column=4, value=low).number_format = "$#,##0"
+        ws.cell(row=rr, column=5, value=high).number_format = "$#,##0"
+        rr += 1
+    last_data_row = rr - 1
 
-    ws.cell(row=r + 1, column=1, value=f"Current Market Price: ${target_price:,.2f}").font = Font(
+    ws.cell(row=rr + 1, column=1, value=f"Current Market Price: ${target_price:,.2f}").font = Font(
         name=FONT_NAME, bold=True, color=NAVY)
 
     # --- Build the stacked horizontal bar chart ---
@@ -874,32 +886,15 @@ def build_football_field_sheet(ws, ticker, company_name, dcf_low, dcf_high,
     # IMPORTANT openpyxl quirk: x_axis is ALWAYS the category axis and
     # y_axis is ALWAYS the value axis, regardless of bar orientation - even
     # though a horizontal bar chart visually displays the category axis
-    # running down the left side. An earlier version of this code set the
-    # value-axis title on x_axis (the wrong one), which is the likely cause
-    # of the method labels not rendering correctly.
-    #
-    # No value-axis title is set here - the "$0, $100, $200..." price scale
-    # is already self-explanatory, and a separate axis title was rendering
-    # on top of the chart title (overlapping text) rather than cleanly
-    # below the axis.
-    chart.x_axis.title = None  # category axis - the method names are self-explanatory
-    chart.x_axis.delete = False  # ensure category (method name) labels are shown
+    # running down the left side.
+    chart.x_axis.title = None
+    chart.x_axis.delete = False
     chart.y_axis.delete = False
-    # Category axis order defaults to bottom-to-top for a horizontal bar
-    # chart, which reverses the table's top-to-bottom row order. Flipping
-    # this makes the chart's visual order match the data table above it.
     chart.x_axis.scaling.orientation = "maxMin"
-    # Explicitly pin each axis's physical position - flipping the category
-    # order above appears to have side-effects on automatic axis placement
-    # (the value axis was rendering at the top, colliding with the chart
-    # title, instead of its conventional position at the bottom).
-    chart.x_axis.axPos = "l"  # category axis on the left
-    chart.y_axis.axPos = "b"  # value axis (price scale) at the bottom
-    chart.title.overlay = False  # reserve dedicated space for the title, never let it share space with the plot
+    chart.x_axis.axPos = "l"
+    chart.y_axis.axPos = "b"
+    chart.title.overlay = False
 
-    # Make the "base" (low-value) series invisible - the standard
-    # football-field trick, so bars appear to float between low and high
-    # instead of starting at zero.
     base_series = chart.series[0]
     base_series.graphicalProperties.noFill = True
     base_series.graphicalProperties.ln.noFill = True
@@ -908,190 +903,281 @@ def build_football_field_sheet(ws, ticker, company_name, dcf_low, dcf_high,
     range_series.graphicalProperties.solidFill = "0B2545"  # navy, matches the workbook palette
 
     chart.legend = None
-    ws.add_chart(chart, f"A{r + 3}")
+    ws.add_chart(chart, f"A{rr + 3}")
 
-    for col_letter, width in zip("ABCDE", [28, 16, 18, 14, 14]):
+    for col_letter, width in zip("ABCDEF", [28, 16, 18, 14, 14, 14]):
         ws.column_dimensions[col_letter].width = width
 
 
 # ---------------------------------------------------------------
 # Monte Carlo sheet - distribution of outcomes, not one point estimate
 # ---------------------------------------------------------------
-def build_monte_carlo_sheet(ws, ticker, company_name, mc_info, current_price):
-    """The quantitative version of Morningstar's Uncertainty Rating (from
-    the very first report analyzed in this project): instead of one
-    implied price, show the full distribution from thousands of simulated
-    DCF runs with randomized revenue growth, WACC, and terminal growth."""
-    _draw_banner(ws, f"{ticker} \u2014 Monte Carlo Simulation", company_name)
+def build_model_validation_sheet(ws, ticker, company_name, mc_info=None, backtest_info=None, current_price=None):
+    """Merged sheet: Monte Carlo (does the model's OUTPUT have a wide range
+    of plausible outcomes?) sits above Backtest (does the model's INPUT
+    methodology actually predict what happens?) - both are 'how much
+    should you trust this' questions, not new valuation numbers, so they
+    read naturally as one 'Model Validation' sheet rather than two thin
+    single-purpose ones. Either section can be omitted independently -
+    this sheet works whether you have Monte Carlo, Backtest, or both."""
+    _draw_banner(ws, f"{ticker} \u2014 Model Validation", company_name)
 
     r = 4
-    ws.cell(row=r, column=1,
-            value=f"{mc_info['n_simulations_completed']:,} simulations, randomizing revenue growth "
-                  f"(historical std dev: {mc_info['growth_std_used']:.1%}), WACC (std dev: "
-                  f"{mc_info['wacc_std_used']:.1%}), and terminal growth (std dev: "
-                  f"{mc_info['terminal_growth_std_used']:.1%}). EBIT margin, capex %, D&A %, and NWC % "
-                  f"are held at their historical-median values - a documented v1 simplification.")
-    ws.cell(row=r, column=1).font = DISCLAIMER_FONT
-    ws.cell(row=r, column=1).alignment = Alignment(wrap_text=True)
-    ws.merge_cells(start_row=r, start_column=1, end_row=r, end_column=8)
-    ws.row_dimensions[r].height = 40
-    r += 2
 
-    ws.cell(row=r, column=1, value="Distribution Summary").font = SECTION_FONT
-    for c in range(1, 3):
-        ws.cell(row=r, column=c).fill = SECTION_FILL
-    r += 1
-
-    stats_rows = [
-        ("Mean Implied Price", mc_info["mean"]),
-        ("Median Implied Price", mc_info["median"]),
-        ("Std Deviation", mc_info["std"]),
-        ("5th Percentile", mc_info["p5"]),
-        ("25th Percentile", mc_info["p25"]),
-        ("75th Percentile", mc_info["p75"]),
-        ("95th Percentile", mc_info["p95"]),
-        ("Min", mc_info["min"]),
-        ("Max", mc_info["max"]),
-    ]
-    for label, value in stats_rows:
-        ws.cell(row=r, column=1, value=label).font = LABEL_FONT
-        vcell = ws.cell(row=r, column=2, value=value)
-        vcell.number_format = "$#,##0.00"
-        vcell.font = BODY_FONT
-        r += 1
-    r += 1
-
-    if current_price:
-        prob = float((mc_info["prices"] > current_price).mean())
+    if mc_info is not None:
         ws.cell(row=r, column=1,
-                value=f"Probability simulated DCF exceeds current market price (${current_price:,.2f})").font = LABEL_FONT
-        pcell = ws.cell(row=r, column=2, value=prob)
-        pcell.number_format = "0.0%"
-        pcell.font = Font(name=FONT_NAME, bold=True, color=NAVY)
+                value=f"{mc_info['n_simulations_completed']:,} simulations, randomizing revenue growth "
+                      f"(historical std dev: {mc_info['growth_std_used']:.1%}), WACC (std dev: "
+                      f"{mc_info['wacc_std_used']:.1%}), and terminal growth (std dev: "
+                      f"{mc_info['terminal_growth_std_used']:.1%}). EBIT margin, capex %, D&A %, and NWC % "
+                      f"are held at their historical-median values - a documented v1 simplification.")
+        ws.cell(row=r, column=1).font = DISCLAIMER_FONT
+        ws.cell(row=r, column=1).alignment = Alignment(wrap_text=True)
+        ws.merge_cells(start_row=r, start_column=1, end_row=r, end_column=8)
+        ws.row_dimensions[r].height = 40
         r += 2
 
-    # --- Histogram: bin the simulated prices, chart the frequency ---
-    ws.cell(row=r, column=1, value="Distribution of Outcomes").font = SECTION_FONT
-    for c in range(1, 3):
-        ws.cell(row=r, column=c).fill = SECTION_FILL
-    r += 1
-
-    counts, bin_edges = np.histogram(mc_info["prices"], bins=20)
-    header_row = r
-    ws.cell(row=header_row, column=1, value="Price Range")
-    ws.cell(row=header_row, column=2, value="Frequency")
-    _style_header_row(ws, header_row, 2)
-    r += 1
-    first_data_row = r
-    for i in range(len(counts)):
-        label = f"${bin_edges[i]:,.0f}-{bin_edges[i+1]:,.0f}"
-        ws.cell(row=r, column=1, value=label).font = BODY_FONT
-        ws.cell(row=r, column=2, value=int(counts[i])).font = BODY_FONT
+        ws.cell(row=r, column=1, value="Monte Carlo: Distribution Summary").font = SECTION_FONT
+        for c in range(1, 3):
+            ws.cell(row=r, column=c).fill = SECTION_FILL
         r += 1
-    last_data_row = r - 1
 
-    chart = BarChart()
-    chart.type = "col"
-    chart.title = f"{ticker} Simulated Implied Price Distribution"
-    chart.y_axis.title = "Frequency"
-    chart.x_axis.title = None
-    chart.x_axis.delete = False
-    chart.height = 9
-    chart.width = 22
-    chart.legend = None
-    data = Reference(ws, min_col=2, min_row=header_row, max_row=last_data_row)
-    cats = Reference(ws, min_col=1, min_row=first_data_row, max_row=last_data_row)
-    chart.add_data(data, titles_from_data=True)
-    chart.set_categories(cats)
-    chart.series[0].graphicalProperties.solidFill = "0B2545"
-    ws.add_chart(chart, f"D{header_row}")
+        stats_rows = [
+            ("Mean Implied Price", mc_info["mean"]),
+            ("Median Implied Price", mc_info["median"]),
+            ("Std Deviation", mc_info["std"]),
+            ("5th Percentile", mc_info["p5"]),
+            ("25th Percentile", mc_info["p25"]),
+            ("75th Percentile", mc_info["p75"]),
+            ("95th Percentile", mc_info["p95"]),
+            ("Min", mc_info["min"]),
+            ("Max", mc_info["max"]),
+        ]
+        for label, value in stats_rows:
+            ws.cell(row=r, column=1, value=label).font = LABEL_FONT
+            vcell = ws.cell(row=r, column=2, value=value)
+            vcell.number_format = "$#,##0.00"
+            vcell.font = BODY_FONT
+            r += 1
+        r += 1
 
-    for col_letter, width in zip("ABCDEFGH", [26, 14, 14, 14, 14, 14, 14, 14]):
+        if current_price:
+            prob = float((mc_info["prices"] > current_price).mean())
+            ws.cell(row=r, column=1,
+                    value=f"Probability simulated DCF exceeds current market price (${current_price:,.2f})").font = LABEL_FONT
+            pcell = ws.cell(row=r, column=2, value=prob)
+            pcell.number_format = "0.0%"
+            pcell.font = Font(name=FONT_NAME, bold=True, color=NAVY)
+            r += 2
+
+        # --- Histogram: bin the simulated prices, chart the frequency ---
+        ws.cell(row=r, column=1, value="Distribution of Outcomes").font = SECTION_FONT
+        for c in range(1, 3):
+            ws.cell(row=r, column=c).fill = SECTION_FILL
+        r += 1
+
+        counts, bin_edges = np.histogram(mc_info["prices"], bins=20)
+        header_row = r
+        ws.cell(row=header_row, column=1, value="Price Range")
+        ws.cell(row=header_row, column=2, value="Frequency")
+        _style_header_row(ws, header_row, 2)
+        r += 1
+        first_data_row = r
+        for i in range(len(counts)):
+            label = f"${bin_edges[i]:,.0f}-{bin_edges[i+1]:,.0f}"
+            ws.cell(row=r, column=1, value=label).font = BODY_FONT
+            ws.cell(row=r, column=2, value=int(counts[i])).font = BODY_FONT
+            r += 1
+        last_data_row = r - 1
+
+        chart = BarChart()
+        chart.type = "col"
+        chart.title = f"{ticker} Simulated Implied Price Distribution"
+        chart.y_axis.title = "Frequency"
+        chart.x_axis.title = None
+        chart.x_axis.delete = False
+        chart.height = 9
+        chart.width = 22
+        chart.legend = None
+        data = Reference(ws, min_col=2, min_row=header_row, max_row=last_data_row)
+        cats = Reference(ws, min_col=1, min_row=first_data_row, max_row=last_data_row)
+        chart.add_data(data, titles_from_data=True)
+        chart.set_categories(cats)
+        chart.series[0].graphicalProperties.solidFill = "0B2545"
+        ws.add_chart(chart, f"D{header_row}")
+
+        # Histogram chart is ~9cm tall / occupies rows down to roughly
+        # header_row + 20 given 20 bins at default row height - start
+        # whatever comes next comfortably below where the chart visually ends.
+        r = max(last_data_row, header_row + 22) + 3
+
+    if backtest_info is not None:
+        ws.cell(row=r, column=1, value="Backtest: Does the Assumption Methodology Actually Work?").font = SECTION_FONT
+        for c in range(1, 5):
+            ws.cell(row=r, column=c).fill = SECTION_FILL
+        r += 1
+        ws.cell(row=r, column=1,
+                value="Tests the core idea this whole model relies on: does historical-median growth/margin "
+                      "predict what actually happens next? Each row predicts a year using ONLY the years "
+                      "before it (no lookahead bias), then compares to what actually occurred. Limited to "
+                      "the ~4 years of history yfinance provides - directionally informative, not "
+                      "statistically robust with this few data points.")
+        ws.cell(row=r, column=1).font = DISCLAIMER_FONT
+        ws.cell(row=r, column=1).alignment = Alignment(wrap_text=True)
+        ws.merge_cells(start_row=r, start_column=1, end_row=r, end_column=6)
+        ws.row_dimensions[r].height = 42
+        r += 2
+
+        ws.cell(row=r, column=1, value="EBIT Margin Predictions").font = SECTION_FONT
+        for c in range(1, 5):
+            ws.cell(row=r, column=c).fill = SECTION_FILL
+        r += 1
+        headers = ["Year", "Predicted Margin", "Actual Margin", "Error"]
+        for col_num, header in enumerate(headers, start=1):
+            ws.cell(row=r, column=col_num, value=header)
+        _style_header_row(ws, r, len(headers))
+        r += 1
+        for _, row in backtest_info["margin_results"].iterrows():
+            ws.cell(row=r, column=1, value=str(row["Year"])).font = BODY_FONT
+            for col, key in zip([2, 3, 4], ["Predicted Margin", "Actual Margin", "Error"]):
+                cell = ws.cell(row=r, column=col, value=row[key])
+                cell.number_format = "+0.00%;-0.00%" if key == "Error" else "0.00%"
+                cell.font = BODY_FONT
+                cell.border = THIN_BORDER
+            r += 1
+        if backtest_info["margin_mae"] is not None:
+            r += 1
+            ws.cell(row=r, column=1, value="Mean Absolute Error").font = LABEL_FONT
+            ws.cell(row=r, column=2, value=backtest_info["margin_mae"]).number_format = "0.00%"
+            r += 1
+            ws.cell(row=r, column=1, value="Bias (negative = under-predicts)").font = LABEL_FONT
+            bias_cell = ws.cell(row=r, column=2, value=backtest_info["margin_bias"])
+            bias_cell.number_format = "+0.00%;-0.00%"
+            bias_cell.font = Font(name=FONT_NAME, bold=True, color=NAVY)
+        r += 2
+
+        ws.cell(row=r, column=1, value="Revenue Growth Predictions").font = SECTION_FONT
+        for c in range(1, 5):
+            ws.cell(row=r, column=c).fill = SECTION_FILL
+        r += 1
+        headers2 = ["Year", "Predicted Growth", "Actual Growth", "Error"]
+        for col_num, header in enumerate(headers2, start=1):
+            ws.cell(row=r, column=col_num, value=header)
+        _style_header_row(ws, r, len(headers2))
+        r += 1
+        for _, row in backtest_info["growth_results"].iterrows():
+            ws.cell(row=r, column=1, value=str(row["Year"])).font = BODY_FONT
+            for col, key in zip([2, 3, 4], ["Predicted Growth", "Actual Growth", "Error"]):
+                cell = ws.cell(row=r, column=col, value=row[key])
+                cell.number_format = "+0.00%;-0.00%" if key == "Error" else "0.00%"
+                cell.font = BODY_FONT
+                cell.border = THIN_BORDER
+            r += 1
+        if backtest_info["growth_mae"] is not None:
+            r += 1
+            ws.cell(row=r, column=1, value="Mean Absolute Error").font = LABEL_FONT
+            ws.cell(row=r, column=2, value=backtest_info["growth_mae"]).number_format = "0.00%"
+            r += 1
+            ws.cell(row=r, column=1, value="Bias (negative = under-predicts)").font = LABEL_FONT
+            bias_cell = ws.cell(row=r, column=2, value=backtest_info["growth_bias"])
+            bias_cell.number_format = "+0.00%;-0.00%"
+            bias_cell.font = Font(name=FONT_NAME, bold=True, color=NAVY)
+        r += 2
+
+        r = _draw_wrapped_box(ws, r,
+            f"Sample size: {backtest_info['n_margin_tests']} margin predictions, "
+            f"{backtest_info['n_growth_tests']} growth predictions. This is a small sample, limited by "
+            f"available financial history - treat these results as suggestive, not statistically proven.",
+            fill=AMBER_FILL_STYLE, border=GOLD_BORDER, font=DISCLAIMER_FONT, chars_per_line=95)
+
+    for col_letter, width in zip("ABCDEFGH", [26, 18, 16, 14, 14, 14, 14, 14]):
         ws.column_dimensions[col_letter].width = width
 
 
 # ---------------------------------------------------------------
-# Backtest sheet - does the core assumption methodology actually work?
+# Management Assumptions sheet - Base/Upside/Downside scenario planning
 # ---------------------------------------------------------------
-def build_backtest_sheet(ws, ticker, company_name, backtest_info):
-    _draw_banner(ws, f"{ticker} \u2014 Backtest: Assumption Methodology", company_name)
+def build_management_assumptions_sheet(ws, ticker, company_name, scenario_results, current_price):
+    """Reframes the DCF's core philosophy: historical data is a STARTING
+    POINT for judgment (standard corporate finance / FP&A practice), not
+    automatically the forecast itself. Upside/Downside are the company's
+    own real best/worst historical years - not fabricated percentages."""
+    _draw_banner(ws, f"{ticker} \u2014 Management Assumptions", company_name)
 
     r = 4
-    ws.cell(row=r, column=1,
-            value="Tests the core idea this whole model relies on: does historical-median growth/margin "
-                  "predict what actually happens next? Each row predicts a year using ONLY the years "
-                  "before it (no lookahead bias), then compares to what actually occurred. Limited to "
-                  "the ~4 years of history yfinance provides - directionally informative, not "
-                  "statistically robust with this few data points.")
-    ws.cell(row=r, column=1).font = DISCLAIMER_FONT
-    ws.cell(row=r, column=1).alignment = Alignment(wrap_text=True)
-    ws.merge_cells(start_row=r, start_column=1, end_row=r, end_column=6)
-    ws.row_dimensions[r].height = 42
-    r += 2
+    r = _draw_wrapped_box(ws, r,
+        "Historical data is a starting point, not the forecast itself. Base case uses the "
+        "historical median (same as the rest of this workbook). Upside and Downside are NOT "
+        "arbitrary percentages - they are this company's own actual best and worst historical "
+        "years on each metric, so every number in every scenario is something that really happened.",
+        chars_per_line=100)
+    r += 1
 
-    ws.cell(row=r, column=1, value="EBIT Margin Predictions").font = SECTION_FONT
+    ws.cell(row=r, column=1, value="Historical Range").font = SECTION_FONT
     for c in range(1, 5):
         ws.cell(row=r, column=c).fill = SECTION_FILL
     r += 1
-    headers = ["Year", "Predicted Margin", "Actual Margin", "Error"]
+    headers = ["Metric", "Worst Year (Downside)", "Median (Base)", "Best Year (Upside)"]
     for col_num, header in enumerate(headers, start=1):
         ws.cell(row=r, column=col_num, value=header)
     _style_header_row(ws, r, len(headers))
     r += 1
-    for _, row in backtest_info["margin_results"].iterrows():
-        ws.cell(row=r, column=1, value=str(row["Year"])).font = BODY_FONT
-        for col, key in zip([2, 3, 4], ["Predicted Margin", "Actual Margin", "Error"]):
-            cell = ws.cell(row=r, column=col, value=row[key])
-            cell.number_format = "+0.00%;-0.00%" if key == "Error" else "0.00%"
+
+    hist = scenario_results["historical_range"]
+    range_rows = [
+        ("Revenue Growth", hist["growth_min"], hist["growth_median"], hist["growth_max"]),
+        ("EBIT Margin", hist["margin_min"], hist["margin_median"], hist["margin_max"]),
+        ("Capex % of Revenue", hist["capex_pct_max"], hist["capex_pct_median"], hist["capex_pct_min"]),
+    ]
+    for label, downside_val, base_val, upside_val in range_rows:
+        ws.cell(row=r, column=1, value=label).font = LABEL_FONT
+        for col, val in zip([2, 3, 4], [downside_val, base_val, upside_val]):
+            cell = ws.cell(row=r, column=col, value=val)
+            cell.number_format = "0.0%"
             cell.font = BODY_FONT
             cell.border = THIN_BORDER
         r += 1
-    if backtest_info["margin_mae"] is not None:
-        r += 1
-        ws.cell(row=r, column=1, value="Mean Absolute Error").font = LABEL_FONT
-        ws.cell(row=r, column=2, value=backtest_info["margin_mae"]).number_format = "0.00%"
-        r += 1
-        ws.cell(row=r, column=1, value="Bias (negative = under-predicts)").font = LABEL_FONT
-        bias_cell = ws.cell(row=r, column=2, value=backtest_info["margin_bias"])
-        bias_cell.number_format = "+0.00%;-0.00%"
-        bias_cell.font = Font(name=FONT_NAME, bold=True, color=NAVY)
-    r += 2
+    r += 1
 
-    ws.cell(row=r, column=1, value="Revenue Growth Predictions").font = SECTION_FONT
-    for c in range(1, 5):
+    ws.cell(row=r, column=1, value="Implied Share Price by Scenario").font = SECTION_FONT
+    for c in range(1, 4):
         ws.cell(row=r, column=c).fill = SECTION_FILL
     r += 1
-    headers2 = ["Year", "Predicted Growth", "Actual Growth", "Error"]
+    headers2 = ["Scenario", "Implied Price", "vs. Current Price"]
     for col_num, header in enumerate(headers2, start=1):
         ws.cell(row=r, column=col_num, value=header)
     _style_header_row(ws, r, len(headers2))
     r += 1
-    for _, row in backtest_info["growth_results"].iterrows():
-        ws.cell(row=r, column=1, value=str(row["Year"])).font = BODY_FONT
-        for col, key in zip([2, 3, 4], ["Predicted Growth", "Actual Growth", "Error"]):
-            cell = ws.cell(row=r, column=col, value=row[key])
-            cell.number_format = "+0.00%;-0.00%" if key == "Error" else "0.00%"
-            cell.font = BODY_FONT
-            cell.border = THIN_BORDER
+
+    scenario_colors = {"downside": "B91C1C", "base": "1F2937", "upside": "2E7D32"}
+    for label in ["downside", "base", "upside"]:
+        price = scenario_results[label]["implied_price"]
+        gap = price / current_price - 1 if current_price else None
+        ws.cell(row=r, column=1, value=label.capitalize()).font = Font(
+            name=FONT_NAME, bold=True, color=scenario_colors[label])
+        pcell = ws.cell(row=r, column=2, value=price)
+        pcell.number_format = "$#,##0.00"
+        pcell.font = BODY_FONT
+        if gap is not None:
+            gcell = ws.cell(row=r, column=3, value=gap)
+            gcell.number_format = "+0.0%;-0.0%"
+            gcell.font = BODY_FONT
+        for c in range(1, 4):
+            ws.cell(row=r, column=c).border = THIN_BORDER
         r += 1
-    if backtest_info["growth_mae"] is not None:
-        r += 1
-        ws.cell(row=r, column=1, value="Mean Absolute Error").font = LABEL_FONT
-        ws.cell(row=r, column=2, value=backtest_info["growth_mae"]).number_format = "0.00%"
-        r += 1
-        ws.cell(row=r, column=1, value="Bias (negative = under-predicts)").font = LABEL_FONT
-        bias_cell = ws.cell(row=r, column=2, value=backtest_info["growth_bias"])
-        bias_cell.number_format = "+0.00%;-0.00%"
-        bias_cell.font = Font(name=FONT_NAME, bold=True, color=NAVY)
+    r += 1
+
+    ws.cell(row=r, column=1, value=f"Current Market Price: ${current_price:,.2f}").font = LABEL_FONT
     r += 2
 
     r = _draw_wrapped_box(ws, r,
-        f"Sample size: {backtest_info['n_margin_tests']} margin predictions, "
-        f"{backtest_info['n_growth_tests']} growth predictions. This is a small sample, limited by "
-        f"available financial history - treat these results as suggestive, not statistically proven.",
+        "Same WACC and terminal growth are used across all three scenarios, isolating the effect "
+        "of the OPERATING assumptions (growth, margin, capex) rather than conflating it with a "
+        "different discount rate per scenario. See the Live DCF sheet to test your own WACC "
+        "alongside these operating scenarios.",
         fill=AMBER_FILL_STYLE, border=GOLD_BORDER, font=DISCLAIMER_FONT, chars_per_line=95)
 
-    for col_letter, width in zip("ABCDE", [12, 18, 16, 12, 12]):
+    for col_letter, width in zip("ABCD", [24, 22, 16, 16]):
         ws.column_dimensions[col_letter].width = width
 
 
@@ -1100,6 +1186,7 @@ def export_to_excel(ticker, company_name, current_price, result, assumptions, fo
                      scenarios=None, ai_output=None, gap_pct=None, analyst_info=None,
                      wacc=0.09, terminal_growth=0.025, tax_rate=0.21, capm_info=None,
                      comps_info=None, monte_carlo_info=None, backtest_info=None,
+                     scenario_results=None,
                      output_path="dcf_output.xlsx"):
     wb = Workbook()
 
@@ -1116,27 +1203,26 @@ def export_to_excel(ticker, company_name, current_price, result, assumptions, fo
                           shares_outstanding, current_price, wacc, terminal_growth, tax_rate,
                           capm_info=capm_info)
 
-    if comps_info is not None:
-        comps_ws = wb.create_sheet("Comps Valuation")
-        build_comps_sheet(comps_ws, ticker, company_name, comps_info, current_price)
+    if scenario_results is not None:
+        mgmt_ws = wb.create_sheet("Management Assumptions")
+        build_management_assumptions_sheet(mgmt_ws, ticker, company_name, scenario_results, current_price)
 
+    if comps_info is not None:
         if scenarios:
             scenario_prices = [s["implied_price"] for s in scenarios]
             dcf_low, dcf_high = min(scenario_prices), max(scenario_prices)
         else:
             dcf_low = dcf_high = result["implied_share_price"]
 
-        ff_ws = wb.create_sheet("Football Field")
-        build_football_field_sheet(ff_ws, ticker, company_name, dcf_low, dcf_high,
-                                     comps_info, analyst_info, current_price)
+        comps_ff_ws = wb.create_sheet("Comps & Football Field")
+        build_comps_and_football_field_sheet(comps_ff_ws, ticker, company_name, comps_info,
+                                                dcf_low, dcf_high, analyst_info, current_price)
 
-    if monte_carlo_info is not None:
-        mc_ws = wb.create_sheet("Monte Carlo")
-        build_monte_carlo_sheet(mc_ws, ticker, company_name, monte_carlo_info, current_price)
-
-    if backtest_info is not None:
-        bt_ws = wb.create_sheet("Backtest")
-        build_backtest_sheet(bt_ws, ticker, company_name, backtest_info)
+    if monte_carlo_info is not None or backtest_info is not None:
+        validation_ws = wb.create_sheet("Model Validation")
+        build_model_validation_sheet(validation_ws, ticker, company_name,
+                                       mc_info=monte_carlo_info, backtest_info=backtest_info,
+                                       current_price=current_price)
 
     if analyst_info is not None:
         analyst_ws = wb.create_sheet("Analyst Insights")
@@ -1151,12 +1237,17 @@ def export_to_excel(ticker, company_name, current_price, result, assumptions, fo
     forecast_ws = wb.create_sheet("DCF Forecast")
     build_forecast_sheet(forecast_ws, ticker, company_name, forecast_df)
 
-    sensitivity_ws = wb.create_sheet("Sensitivity")
-    build_sensitivity_sheet(sensitivity_ws, ticker, company_name, sensitivity_df, current_price)
-
     if scenarios:
-        scenario_ws = wb.create_sheet("Scenarios")
-        build_scenario_sheet(scenario_ws, ticker, company_name, scenarios)
+        sens_scen_ws = wb.create_sheet("Sensitivity & Scenarios")
+        build_sensitivity_and_scenarios_sheet(sens_scen_ws, ticker, company_name, scenarios,
+                                                 sensitivity_df, current_price)
+    else:
+        # No named scenarios provided - just show the sensitivity grid,
+        # reusing the merged function with an empty scenario list rather
+        # than maintaining a second standalone code path.
+        sens_ws = wb.create_sheet("Sensitivity & Scenarios")
+        build_sensitivity_and_scenarios_sheet(sens_ws, ticker, company_name, [],
+                                                 sensitivity_df, current_price)
 
     wb.save(output_path)
     print(f"Saved: {output_path}")
@@ -1192,6 +1283,10 @@ if __name__ == "__main__":
                          help="Add a Backtest sheet testing whether historical-median growth/margin "
                               "actually predicted what happened next (leave-future-out validation). "
                               "Free, no API key needed.")
+    parser.add_argument("--scenarios", action="store_true",
+                         help="Add a Management Assumptions sheet with Base/Upside/Downside cases, "
+                              "each derived from this company's own real historical best/worst years "
+                              "(not fabricated). Free, no API key needed.")
     args = parser.parse_args()
 
     ticker = args.ticker
@@ -1298,10 +1393,20 @@ if __name__ == "__main__":
         print("Running backtest (free, no API key needed)...")
         backtest_info = run_backtest(df)
 
+    mgmt_scenario_results = None
+    if args.scenarios:
+        from scenario_planning import run_scenario_valuations
+        print("Building Base/Upside/Downside scenarios from real historical data (free, no API key needed)...")
+        mgmt_scenario_results = run_scenario_valuations(
+            df, cash=cash, total_debt=total_debt, shares_outstanding=shares_outstanding,
+            wacc=args.wacc, terminal_growth=args.terminal_growth,
+        )
+
     export_to_excel(ticker, company_name, current_price, result, assumptions, forecast_df,
                      sensitivity_df, cash, total_debt, shares_outstanding,
                      scenarios=scenarios, ai_output=ai_output, gap_pct=gap_pct,
                      analyst_info=analyst_info, capm_info=capm_info, comps_info=comps_info,
                      monte_carlo_info=monte_carlo_info, backtest_info=backtest_info,
+                     scenario_results=mgmt_scenario_results,
                      wacc=args.wacc, terminal_growth=args.terminal_growth,
                      output_path=f"{ticker}_dcf_output.xlsx")
