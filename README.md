@@ -4,6 +4,8 @@ A Python tool that pulls live financial data for any public company, builds a dr
 
 Built as a portfolio project applying analysis work from my investment internship (BNP Paribas Fortis) in a reproducible, auditable, code-based form - rather than a one-off Excel file. The core design principle: historical data is a **starting point for judgment**, not automatically the forecast itself - the Management Assumptions sheet makes this explicit, deriving Base/Upside/Downside cases from the company's own real historical range rather than a single fixed projection.
 
+**[Try the live app →](https://bellekens-valuation.streamlit.app)** (no installation required)
+
 ![Streamlit app screenshot](screenshots/streamlit_app.png)
 *The Streamlit interface: rule-based valuation rating, live price history, capital structure and analyst recommendation breakdowns, all built on the same tested pipeline as the command-line tools and Excel export.*
 
@@ -40,7 +42,7 @@ Built as a portfolio project applying analysis work from my investment internshi
 10. Runs a Monte Carlo simulation (thousands of randomized DCF runs) to show a full probability distribution of outcomes instead of one point estimate - the quantitative version of Morningstar's Uncertainty Rating concept (free, no API key)
 11. Backtests the forecast methodology itself - does historical-median growth/margin actually predict what happens next? Uses leave-future-out validation against the company's own real history, the same technique used to evaluate forecast accuracy in FP&A (free, no API key)
 12. Exports a multi-sheet Excel workbook: Cover, Summary, Live DCF, Management Assumptions, Analyst Insights, AI Valuation Summary (optional), Comps Valuation (optional), Football Field chart (optional), Monte Carlo (optional), Backtest (optional), DCF Forecast, Sensitivity, and Scenario Comparison
-13. Provides a Streamlit UI as an alternative to the command-line interface, [deployed live](https://bellekens-valuation.streamlit.app) - try it without installing anything
+13. Provides a Streamlit UI as an alternative to the command-line interface (see the live link at the top of this README)
 
 ## Example output: Microsoft (MSFT)
 
