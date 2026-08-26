@@ -76,3 +76,18 @@ def test_resolve_ticker_candidates_gives_up_after_exhausting_retries():
         candidates = resolve_ticker_candidates("Microsoft")
     assert candidates == []
     assert mock_search_cls.call_count == 2  # attempted twice, then gave up
+
+
+def test_resolve_ticker_candidates_enables_fuzzy_matching():
+    """Real bug reported via manual testing: searching 'Hermes' (plain
+    ASCII, as any user would type it) returned zero matches, even though
+    the company's official name is 'Hermès International' (with the
+    accent). yfinance's Search defaults to enable_fuzzy_query=False -
+    without it, an exact/literal match against the accented official name
+    can fail. This must be explicitly turned on."""
+    mock_search = MagicMock()
+    mock_search.quotes = [{"symbol": "RMS.PA", "shortname": "Hermès International"}]
+    with patch("yfinance.Search", return_value=mock_search) as mock_search_cls:
+        resolve_ticker_candidates("Hermes")
+    _, kwargs = mock_search_cls.call_args
+    assert kwargs.get("enable_fuzzy_query") is True

@@ -139,6 +139,25 @@ def get_current_price_and_shares(stock_info: dict) -> tuple:
     return price, shares
 
 
+_CURRENCY_SYMBOLS = {
+    "USD": "$", "EUR": "€", "GBP": "£", "JPY": "¥",
+    "CNY": "¥", "CHF": "CHF ", "CAD": "C$", "AUD": "A$", "HKD": "HK$",
+    "SEK": "kr ", "NOK": "kr ", "DKK": "kr ", "INR": "₹", "KRW": "₩",
+    "BRL": "R$", "SGD": "S$",
+}
+
+
+def currency_symbol(currency_code: str) -> str:
+    """Best-effort display symbol for a currency code, for showing prices
+    in the currency the DCF was actually computed in (the ticker's trading
+    currency) rather than always hardcoding '$'. Falls back to the raw
+    code plus a space for anything not in the common list - still
+    unambiguous, just less pretty than a native symbol."""
+    if not currency_code:
+        return "$"
+    return _CURRENCY_SYMBOLS.get(currency_code, f"{currency_code} ")
+
+
 if __name__ == "__main__":
     ticker = "MSFT"
     print(f"Pulling financial data for {ticker}...\n")

@@ -17,7 +17,10 @@ import streamlit as st
 import yfinance as yf
 import matplotlib.pyplot as plt
 
-from step2_get_financials import get_dcf_inputs, check_currency_mismatch, get_current_price_and_shares
+from step2_get_financials import (
+    get_dcf_inputs, check_currency_mismatch, get_current_price_and_shares, currency_symbol,
+)
+from fx_conversion import fetch_fx_rate, convert_financial_statements
 from step3_dcf_engine import run_dcf_scenario
 from step4_sensitivity import build_sensitivity_table
 from step5_excel_export import export_to_excel
@@ -164,19 +167,45 @@ if run_button:
 
         currency_check = check_currency_mismatch(stock_info)
         if currency_check["mismatch"]:
-            st.error(
-                f"**Currency mismatch detected for {ticker}.** This stock trades in "
-                f"**{currency_check['trading_currency']}**, but its underlying financial "
-                f"statements are reported in **{currency_check['financial_currency']}**. "
-                f"A common situation for non-US companies with a US-listed ADR (e.g. Sony, "
-                f"Toyota). This tool doesn't perform currency conversion, so the DCF's "
-                f"enterprise/equity value (calculated from {currency_check['financial_currency']}"
-                f"-denominated financials) can't be safely divided by a "
-                f"{currency_check['trading_currency']}-based share count - the result would be "
-                f"a meaningless number, not just an inaccurate one. Try a company that reports "
-                f"in the same currency it trades in (e.g. most US-domiciled companies)."
-            )
-            st.stop()
+            # Companies like AB InBev trade in one currency (EUR, on
+            # Euronext Brussels) but report consolidated financials in
+            # another (USD) - a genuine, real-world mismatch, not a data
+            # error. Rather than blocking outright (the original,
+            # conservative behavior - safe, but meant every non-US company
+            # reporting in a foreign currency was simply unusable), convert
+            # the financials into the trading currency at the current spot
+            # rate and proceed, with a clear disclosure of what was done.
+            try:
+                with st.spinner(
+                    f"Currency mismatch detected ({currency_check['financial_currency']} "
+                    f"reported vs {currency_check['trading_currency']} traded) - converting..."
+                ):
+                    fx_rate = fetch_fx_rate(
+                        currency_check["financial_currency"], currency_check["trading_currency"]
+                    )
+                    df = convert_financial_statements(df, fx_rate)
+                st.info(
+                    f"**Currency conversion applied for {ticker}.** This stock trades in "
+                    f"**{currency_check['trading_currency']}**, but its financial statements are "
+                    f"reported in **{currency_check['financial_currency']}**. The financials were "
+                    f"converted to {currency_check['trading_currency']} at today's spot rate "
+                    f"(1 {currency_check['financial_currency']} = {fx_rate:.4f} "
+                    f"{currency_check['trading_currency']}) before running the DCF. This applies "
+                    f"one current rate across all historical years rather than each year's own "
+                    f"average rate, so treat the result as directionally correct, not "
+                    f"to-the-cent precise."
+                )
+            except Exception as e:
+                st.error(
+                    f"**Currency mismatch detected for {ticker}** (trades in "
+                    f"{currency_check['trading_currency']}, reports in "
+                    f"{currency_check['financial_currency']}), and the live currency conversion "
+                    f"failed: {e}. This is usually a temporary issue with the free FX rate "
+                    f"service - wait a moment and click **Run Analysis** again."
+                )
+                st.stop()
+
+        sym = currency_symbol(stock_info.get("currency"))
 
         overrides = {"avg_capex_pct_revenue": capex_override} if capex_override is not None else None
 
@@ -212,8 +241,8 @@ if run_button:
             )
             st.markdown(f"#### {stars_html}  {rating['label']}", unsafe_allow_html=True)
             m1, m2, m3 = st.columns(3)
-            m1.metric("Current Price", f"${current_price:,.2f}")
-            m2.metric("Implied Price (DCF)", f"${result['implied_share_price']:,.2f}")
+            m1.metric("Current Price", f"{sym}{current_price:,.2f}")
+            m2.metric("Implied Price (DCF)", f"{sym}{result['implied_share_price']:,.2f}")
             # Positive gap = DCF implies the stock is worth MORE than the
             # current price (undervalued signal) - Streamlit's default
             # "normal" delta coloring (positive=green) already matches this
@@ -338,9 +367,9 @@ if run_button:
                 st.caption("Analyst Consensus")
                 targets = analyst_info["price_targets"]
                 a1, a2, a3 = st.columns(3)
-                a1.metric("Analyst Low", f"${targets.get('low', 0):,.2f}")
-                a2.metric("Analyst Mean", f"${targets.get('mean', 0):,.2f}")
-                a3.metric("Analyst High", f"${targets.get('high', 0):,.2f}")
+                a1.metric("Analyst Low", f"{sym}{targets.get('low', 0):,.2f}")
+                a2.metric("Analyst Mean", f"{sym}{targets.get('mean', 0):,.2f}")
+                a3.metric("Analyst High", f"{sym}{targets.get('high', 0):,.2f}")
 
         # --- Forecast & sensitivity, grouped together ---
         with st.container(border=True):
@@ -355,10 +384,10 @@ if run_button:
             for col in display_forecast_df.columns:
                 if col != "Year":
                     display_forecast_df[col] = (display_forecast_df[col] / 1_000_000).apply(
-                        lambda v: f"${v:,.0f}"
+                        lambda v: f"{sym}{v:,.0f}"
                     )
             display_forecast_df = display_forecast_df.rename(
-                columns={col: f"{col} ($M)" for col in display_forecast_df.columns if col != "Year"}
+                columns={col: f"{col} ({sym}M)" for col in display_forecast_df.columns if col != "Year"}
             )
             st.dataframe(display_forecast_df, use_container_width=True)
 
@@ -374,7 +403,7 @@ if run_button:
             styled_sensitivity = (
                 sensitivity_df.style
                 .background_gradient(cmap="RdYlGn", axis=None)
-                .format("${:,.2f}")
+                .format(sym + "{:,.2f}")
             )
             st.dataframe(styled_sensitivity, use_container_width=True)
 
@@ -392,9 +421,9 @@ if run_button:
                 comps_info = compute_comps_valuation(ticker, peer_tickers, shares_outstanding, cash, total_debt)
                 st.subheader("Comps Valuation")
                 c1, c2 = st.columns(2)
-                c1.metric("Implied Price (EV/EBITDA)", f"${comps_info['implied_price_ev_ebitda']:,.2f}"
+                c1.metric("Implied Price (EV/EBITDA)", f"{sym}{comps_info['implied_price_ev_ebitda']:,.2f}"
                           if comps_info['implied_price_ev_ebitda'] else "N/A")
-                c2.metric("Implied Price (P/E)", f"${comps_info['implied_price_pe']:,.2f}"
+                c2.metric("Implied Price (P/E)", f"{sym}{comps_info['implied_price_pe']:,.2f}"
                           if comps_info['implied_price_pe'] else "N/A")
 
         monte_carlo_info = None
@@ -407,8 +436,8 @@ if run_button:
                 )
                 st.subheader("Monte Carlo Simulation")
                 mc1, mc2, mc3 = st.columns(3)
-                mc1.metric("Mean Implied Price", f"${monte_carlo_info['mean']:,.2f}")
-                mc2.metric("5th-95th Percentile", f"${monte_carlo_info['p5']:,.0f} - ${monte_carlo_info['p95']:,.0f}")
+                mc1.metric("Mean Implied Price", f"{sym}{monte_carlo_info['mean']:,.2f}")
+                mc2.metric("5th-95th Percentile", f"{sym}{monte_carlo_info['p5']:,.0f} - {sym}{monte_carlo_info['p95']:,.0f}")
                 prob = float((monte_carlo_info["prices"] > current_price).mean())
                 mc3.metric("Prob. DCF Exceeds Market Price", f"{prob:.1%}")
 
@@ -424,9 +453,9 @@ if run_button:
                 st.caption("Upside/Downside are this company's own real best/worst historical years - "
                            "not fabricated percentages.")
                 s1, s2, s3 = st.columns(3)
-                s1.metric("Downside", f"${mgmt_scenario_results['downside']['implied_price']:,.2f}")
-                s2.metric("Base", f"${mgmt_scenario_results['base']['implied_price']:,.2f}")
-                s3.metric("Upside", f"${mgmt_scenario_results['upside']['implied_price']:,.2f}")
+                s1.metric("Downside", f"{sym}{mgmt_scenario_results['downside']['implied_price']:,.2f}")
+                s2.metric("Base", f"{sym}{mgmt_scenario_results['base']['implied_price']:,.2f}")
+                s3.metric("Upside", f"{sym}{mgmt_scenario_results['upside']['implied_price']:,.2f}")
 
         backtest_info = None
         if include_backtest:

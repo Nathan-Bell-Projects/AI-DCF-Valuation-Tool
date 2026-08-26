@@ -12,7 +12,7 @@ These directly encode two real bugs found during manual testing:
 
 import math
 import pandas as pd
-from step2_get_financials import get_dcf_inputs, get_current_price_and_shares
+from step2_get_financials import get_dcf_inputs, get_current_price_and_shares, currency_symbol
 
 
 class _FakeStock:
@@ -137,3 +137,23 @@ class TestGetCurrentPriceAndShares:
 
     def test_missing_everything_returns_none_not_a_crash(self):
         assert get_current_price_and_shares({}) == (None, None)
+
+
+class TestCurrencySymbol:
+    """Once currency-mismatched tickers (e.g. AB InBev: EUR-traded,
+    USD-reported) go through FX conversion instead of being hard-blocked,
+    the UI needs to show prices in the right currency symbol - not always
+    a hardcoded '$', which would be silently wrong for a EUR-priced stock."""
+
+    def test_common_currencies_get_native_symbols(self):
+        assert currency_symbol("USD") == "$"
+        assert currency_symbol("EUR") == "€"
+        assert currency_symbol("GBP") == "£"
+        assert currency_symbol("JPY") == "¥"
+
+    def test_unmapped_currency_falls_back_to_code(self):
+        assert currency_symbol("ZAR") == "ZAR "
+
+    def test_missing_currency_defaults_to_dollar(self):
+        assert currency_symbol(None) == "$"
+        assert currency_symbol("") == "$"

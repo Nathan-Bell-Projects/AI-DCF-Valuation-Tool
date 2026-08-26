@@ -1,27 +1,21 @@
 """
 Currency conversion via Frankfurter (free, no API key, ECB-sourced rates)
 ------------------------------------------------------------------------------------
-STATUS: standalone module, NOT yet wired into app.py or step5_excel_export.py.
+Wired into app.py: when check_currency_mismatch() (step2_get_financials.py)
+detects a mismatch (e.g. AB InBev: EUR-traded, USD-reported; SONY: USD-
+traded, JPY-reported), the app fetches the current spot rate and converts
+the financials into the trading currency before running the DCF - shown to
+the user as a disclosed conversion, rather than a hard block. If the live
+FX call itself fails, the app surfaces that as a retry-able error instead
+of silently proceeding on unconverted figures.
 
-This exists to extend check_currency_mismatch() (step2_get_financials.py) -
-currently, a mismatch (e.g. SONY: USD-traded, JPY-reported) causes the tool
-to safely REFUSE to show a number. This module is the next step: actually
-converting the JPY-denominated financials to USD before running the DCF,
-so a currency mismatch becomes usable instead of blocked.
-
-Deliberately built and tested in isolation, not connected to the live
-Streamlit app in this same session - wiring this in means changing how
-check_currency_mismatch()'s result is handled (currently: block; would
-become: convert and proceed with a disclosure), which touches the same
-live, CV-linked app that a same-day untested change already broke once
-(the streamlit-extras rollback). That integration deserves its own
-focused session, not 30 rushed minutes.
-
-Note: this sandbox's network access does not include api.frankfurter.dev,
-so the live API call itself could not be tested end-to-end from here -
-verified instead against Frankfurter's documented response format with a
-mocked test. Run test_fx_conversion.py yourself with real network access
-to confirm the live call actually works before relying on it.
+Note: this project's development sandbox's network access does not
+include api.frankfurter.dev, so the live API call itself could not be
+tested end-to-end from there - verified instead against Frankfurter's
+documented response format with a mocked test. If this ever needs
+re-verifying end-to-end, run test_fx_conversion.py with real network
+access, or just watch it work live in the deployed app (AB InBev is a
+reliable real-world trigger for this path).
 """
 
 import requests

@@ -54,7 +54,11 @@ def resolve_ticker_candidates(query: str, max_results: int = 5) -> list:
     last_error = None
     for attempt in range(_SEARCH_RETRY_ATTEMPTS):
         try:
-            quotes = Search(query, max_results=max_results).quotes
+            # enable_fuzzy_query lets Yahoo's search match approximate/
+            # partial spellings - without it (yfinance's own default),
+            # an accented official name like "Hermès International" can
+            # fail to match the plain-ASCII "Hermes" a user actually types.
+            quotes = Search(query, max_results=max_results, enable_fuzzy_query=True).quotes
             break
         except Exception as e:
             last_error = e
