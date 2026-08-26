@@ -91,3 +91,41 @@ def test_resolve_ticker_candidates_enables_fuzzy_matching():
         resolve_ticker_candidates("Hermes")
     _, kwargs = mock_search_cls.call_args
     assert kwargs.get("enable_fuzzy_query") is True
+
+
+def test_manual_alias_resolves_hermes_even_if_live_search_fails():
+    """Confirmed real-world case (still failing even with fuzzy matching
+    enabled): Yahoo's search just doesn't reliably surface Hermès
+    International under the common English spelling 'Hermes'. The manual
+    alias table guarantees this well-known name resolves regardless of
+    what Yahoo's search returns - even a total search failure."""
+    with patch("ticker_lookup.time.sleep"), \
+         patch("yfinance.Search", side_effect=Exception("still no match")):
+        candidates = resolve_ticker_candidates("Hermes")
+    assert {"symbol": "RMS.PA", "name": "Hermès International"} in candidates
+
+
+def test_manual_alias_lookup_is_case_and_accent_insensitive():
+    with patch("yfinance.Search", side_effect=Exception("down")):
+        assert resolve_ticker_candidates("  HERMES  ")[0]["symbol"] == "RMS.PA"
+        assert resolve_ticker_candidates("Hermès")[0]["symbol"] == "RMS.PA"
+
+
+def test_manual_alias_does_not_duplicate_when_search_also_returns_it():
+    """If Yahoo's own search does return the same symbol, it should be
+    merged, not duplicated."""
+    mock_search = MagicMock()
+    mock_search.quotes = [{"symbol": "RMS.PA", "shortname": "Hermès International"}]
+    with patch("yfinance.Search", return_value=mock_search):
+        candidates = resolve_ticker_candidates("Hermes")
+    assert len([c for c in candidates if c["symbol"] == "RMS.PA"]) == 1
+
+
+def test_manual_alias_does_not_apply_to_unrelated_queries():
+    """The alias table must not shadow a genuine, unrelated live search
+    result for anything not explicitly in the list."""
+    mock_search = MagicMock()
+    mock_search.quotes = [{"symbol": "MSFT", "shortname": "Microsoft Corporation"}]
+    with patch("yfinance.Search", return_value=mock_search):
+        candidates = resolve_ticker_candidates("Microsoft")
+    assert candidates == [{"symbol": "MSFT", "name": "Microsoft Corporation"}]

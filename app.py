@@ -320,7 +320,7 @@ if run_button:
             except Exception:
                 is_dark_theme = True  # sensible fallback matching this app's default palette
             chart_text_color = "white" if is_dark_theme else "#1F2937"
-            chart_col1, chart_col2 = st.columns(2)
+            chart_col1, chart_col2, chart_col3 = st.columns(3)
 
             with chart_col1:
                 st.caption("Capital Structure (Market Value)")
@@ -361,6 +361,44 @@ if run_button:
                         buf2 = io.BytesIO()
                         fig2.savefig(buf2, format="png", transparent=True, dpi=150, bbox_inches="tight")
                         st.image(buf2)
+
+            with chart_col3:
+                # Always available (no optional data pull needed, unlike
+                # analyst recommendations) - a standard valuation sanity
+                # check: how much of the DCF's enterprise value rests on
+                # the explicit forecast vs. the terminal value (everything
+                # beyond year 5). A high terminal-value share means the
+                # valuation leans heavily on the perpetuity-growth
+                # assumption rather than near-term forecasted cash flow -
+                # exactly the kind of thing a reviewer would want flagged,
+                # not buried in a number they'd have to compute themselves.
+                st.caption("Enterprise Value Composition")
+                pv_explicit = result["pv_explicit_period"]
+                pv_terminal = result["pv_terminal_value"]
+                total_ev = pv_explicit + pv_terminal
+                # Guard against a negative explicit-period or terminal value
+                # (seen for capital-intensive companies like REITs, where a
+                # standard DCF is already a known poor fit - see README) -
+                # a pie chart can't sensibly show a negative slice.
+                if total_ev > 0 and pv_explicit >= 0 and pv_terminal >= 0:
+                    ev_weights = [pv_explicit / total_ev, pv_terminal / total_ev]
+                    ev_labels = [
+                        f"Explicit forecast ({ev_weights[0]:.0%})",
+                        f"Terminal value ({ev_weights[1]:.0%})",
+                    ]
+                    fig3, ax3 = plt.subplots(figsize=(3, 3))
+                    fig3.patch.set_alpha(0)
+                    ax3.patch.set_alpha(0)
+                    ax3.pie(ev_weights, labels=ev_labels, colors=["#5B8DEF", "#0B2545"],
+                            wedgeprops=dict(width=0.42), startangle=90,
+                            textprops={"color": chart_text_color, "fontsize": 9, "weight": "medium"})
+                    buf3 = io.BytesIO()
+                    fig3.savefig(buf3, format="png", transparent=True, dpi=150, bbox_inches="tight")
+                    st.image(buf3)
+                    st.caption(
+                        "Share of the DCF's enterprise value coming from the explicit "
+                        "5-year forecast vs. the terminal (perpetuity-growth) value."
+                    )
 
             if analyst_info.get("price_targets"):
                 st.divider()
