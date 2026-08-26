@@ -294,7 +294,7 @@ if __name__ == "__main__":
                                         analyst_info=analyst_info)
     rating = output["rating"]
     stars_display = "\u2605" * rating["stars"] + "\u2606" * (5 - rating["stars"])
-    print(f"--- Valuation Rating (rule-based, from gap %) ---")
+    print("--- Valuation Rating (rule-based, from gap %) ---")
     print(f"{stars_display}  {rating['label']}")
-    print(f"\n--- AI Explanation ---")
+    print("\n--- AI Explanation ---")
     print(output["explanation"])

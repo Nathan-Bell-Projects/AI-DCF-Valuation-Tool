@@ -257,7 +257,7 @@ if __name__ == "__main__":
     total_debt = df.loc["Total Debt", latest_year]
     shares_outstanding = yf.Ticker(args.ticker).info.get("sharesOutstanding")
 
-    print(f"\n--- Pulled real balance sheet figures ---")
+    print("\n--- Pulled real balance sheet figures ---")
     print(f"  Cash: {cash:,.0f}")
     print(f"  Total Debt: {total_debt:,.0f}")
     print(f"  Shares Outstanding: {shares_outstanding:,.0f}")

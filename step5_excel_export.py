@@ -305,7 +305,7 @@ def build_ai_summary_sheet(ws, ticker, company_name, result, current_price,
             total = sum(counts.values())
             street_view = f"{dominant} ({counts[dominant]}/{total} analysts)"
             mean_target = analyst_info.get("price_targets", {}).get("mean")
-            street_basis = (f"Analyst consensus" + (f", mean target ${mean_target:,.2f}" if mean_target else ""))
+            street_basis = ("Analyst consensus" + (f", mean target ${mean_target:,.2f}" if mean_target else ""))
         except Exception:
             pass
 
@@ -1257,7 +1257,7 @@ if __name__ == "__main__":
     import argparse
     import os
     import yfinance as yf
-    from step3_dcf_engine import get_dcf_inputs, get_historical_assumptions, forecast_free_cash_flow, calculate_dcf_valuation
+    from step3_dcf_engine import get_dcf_inputs, get_historical_assumptions, forecast_free_cash_flow
     from step4_sensitivity import build_sensitivity_table
     from config import DEFAULT_WACC, DEFAULT_TERMINAL_GROWTH
 

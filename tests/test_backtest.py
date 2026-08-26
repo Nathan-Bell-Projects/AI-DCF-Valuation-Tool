@@ -7,7 +7,7 @@ a future refactor accidentally breaking the leave-future-out logic.
 """
 
 import pytest
-from backtest import backtest_margin_accuracy, backtest_growth_accuracy, run_backtest
+from backtest import backtest_margin_accuracy, run_backtest
 
 
 def test_no_lookahead_bias(msft_like_df):

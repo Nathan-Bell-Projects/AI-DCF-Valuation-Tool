@@ -10,7 +10,6 @@ in a tight loop. Fixed by adding a verbose parameter that defaults to True
 simulation loop.
 """
 
-import pytest
 from monte_carlo import run_monte_carlo, probability_above_price
 
 

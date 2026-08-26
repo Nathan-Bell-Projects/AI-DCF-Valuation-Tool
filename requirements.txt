@@ -1,7 +1,14 @@
-yfinance
-pandas
-openpyxl
-anthropic
-numpy
-streamlit
-matplotlib
+# Pinned to the exact versions this project was verified against (full
+# pytest suite + a clean `import app` check) - unpinned dependencies are
+# exactly what caused the "streamlit-extras rollback" incident mentioned
+# in the README, where an unrelated library update broke the live app
+# without any code change on this end. Before redeploying after touching
+# this file, run the full test suite and a manual smoke test locally.
+yfinance==1.7.0
+pandas==3.0.5
+openpyxl==3.1.5
+anthropic==1.1.0
+numpy==2.4.6
+streamlit==1.62.0
+matplotlib==3.11.1
+requests==2.34.2
