@@ -98,7 +98,7 @@ For a clickable UI instead of remembering command-line flags:
 streamlit run app.py
 ```
 
-Opens a browser tab with a sidebar for ticker, WACC, terminal growth, and toggles for every optional feature (comps, Monte Carlo, backtest, AI summary). Click "Run Analysis" to see a rule-based valuation rating, key metrics, a resampled price history chart, capital structure and analyst recommendation donut charts, and a color-graded WACC/growth sensitivity table matching the Excel workbook's conditional formatting - then download the full Excel workbook. Also guards against a real data-integrity issue found during testing: some non-US companies (e.g. Sony) trade in one currency but report financials in another, which silently produces a meaningless implied price if not caught - the app detects this and blocks the analysis with a clear explanation rather than showing a wrong number.
+Opens a browser tab with a sidebar for ticker, WACC, terminal growth, and toggles for every optional feature (comps, Monte Carlo, backtest, AI summary). Don't know a company's ticker? Type its name instead (e.g. "Microsoft") - `ticker_lookup.py` resolves it via Yahoo Finance's own search (free, no API key) and lets you pick the right match from a short list; input that already looks like a ticker skips this entirely and runs exactly as before. Click "Run Analysis" to see a rule-based valuation rating, key metrics, a resampled price history chart, capital structure and analyst recommendation donut charts, and a color-graded WACC/growth sensitivity table matching the Excel workbook's conditional formatting - then download the full Excel workbook. Also guards against a real data-integrity issue found during testing: some non-US companies (e.g. Sony) trade in one currency but report financials in another, which silently produces a meaningless implied price if not caught - the app detects this and blocks the analysis with a clear explanation rather than showing a wrong number.
 
 `app.py` contains no new financial logic - it's a thin UI layer calling the exact same tested functions as the command-line scripts.
 
@@ -156,6 +156,7 @@ scenario_planning.py       # Base/Upside/Downside from real historical best/wors
 capm_wacc.py               # CAPM-based suggested WACC calculation (no API key)
 config.py                  # Shared default constants (tax rate, WACC, ERP, sensitivity ranges)
 app.py                     # Streamlit UI - thin wrapper over the same tested functions, no new logic
+ticker_lookup.py           # Resolves a typed company name to a ticker symbol, for the Streamlit UI (no API key)
 inspect_fields.py          # Diagnostic tool: lists a ticker's actual yfinance field names
 ```
 

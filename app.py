@@ -24,9 +24,10 @@ from step5_excel_export import export_to_excel
 from analyst_data import get_analyst_data
 from capm_wacc import compute_capm_wacc
 from step6_ai_summary import compute_valuation_rating
+from ticker_lookup import looks_like_ticker, resolve_ticker_candidates
 from config import DEFAULT_WACC, DEFAULT_TERMINAL_GROWTH, DEFAULT_SENSITIVITY_WACC_RANGE, DEFAULT_SENSITIVITY_GROWTH_RANGE
 
-st.set_page_config(page_title="AI-Assisted DCF Valuation Tool", layout="wide")
+st.set_page_config(page_title="AI-Assisted DCF Valuation Tool", layout="wide", page_icon="📈")
 
 st.title("AI-Assisted DCF Valuation Tool")
 st.caption(
@@ -39,7 +40,30 @@ st.caption(
 # ---------------------------------------------------------------
 with st.sidebar:
     st.header("Inputs")
-    ticker = st.text_input("Ticker", value="MSFT").strip().upper()
+    ticker_query = st.text_input(
+        "Ticker or company name", value="MSFT",
+        help="Know the ticker? Type it directly (e.g. MSFT). Don't know it? "
+             "Type the company name instead (e.g. Microsoft) and pick it from the list.",
+    ).strip()
+
+    # Fast path: input already looks like a ticker (the common case for
+    # anyone who already knows what they want to run) - skip the network
+    # round-trip entirely and use it exactly as typed, same behavior as
+    # before this lookup existed.
+    ticker = ticker_query.upper()
+    if ticker_query and not looks_like_ticker(ticker_query):
+        with st.spinner(f"Looking up '{ticker_query}'..."):
+            candidates = resolve_ticker_candidates(ticker_query)
+        if candidates:
+            options = [f'{c["symbol"]} — {c["name"]}' for c in candidates]
+            choice = st.selectbox("Select the company:", options, key="ticker_candidate_choice")
+            ticker = choice.split(" — ")[0]
+        else:
+            st.caption(
+                f"No ticker match found for '{ticker_query}' - try typing the "
+                f"ticker symbol directly instead (e.g. MSFT)."
+            )
+
     wacc = st.slider("WACC (discount rate)", 0.03, 0.15, DEFAULT_WACC, 0.005, format="%.3f")
     terminal_growth = st.slider("Terminal growth rate", 0.0, 0.05, DEFAULT_TERMINAL_GROWTH, 0.0025, format="%.4f")
 
@@ -75,6 +99,12 @@ with st.sidebar:
         api_key = st.text_input("Anthropic API key", type="password")
 
     run_button = st.button("Run Analysis", type="primary", use_container_width=True)
+
+    st.divider()
+    st.caption(
+        "Built by [Nathan Bellekens](https://www.linkedin.com/in/nathanbellekens) · "
+        "[View source on GitHub](https://github.com/Nathan-Bell-Projects/AI-DCF-Valuation-Tool)"
+    )
 
 
 # ---------------------------------------------------------------
@@ -429,4 +459,15 @@ if run_button:
         st.exception(e)
 
 else:
+    st.markdown("#### Get started")
+    st.write(
+        "This tool pulls live financial data for any public company and builds a full "
+        "DCF valuation - scenario planning, a WACC/growth sensitivity grid, comps, Monte "
+        "Carlo simulation, and a backtest of the forecasting methodology itself - then "
+        "exports everything into a polished, formula-driven Excel workbook."
+    )
+    st.caption(
+        "Don't have a ticker in mind? Try **MSFT**, **AAPL**, **PG**, or **O** (Realty Income) - "
+        "or just type a company name in the sidebar and pick it from the list."
+    )
     st.info("Set your inputs in the sidebar, then click **Run Analysis**.")
