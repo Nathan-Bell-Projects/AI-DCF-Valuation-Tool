@@ -1,0 +1,29 @@
+# Locks the app to this project's own white/navy brand identity regardless
+# of a visitor's OS/browser light-dark preference. Before this file
+# existed, the app inherited whichever theme the visitor's system was set
+# to (light or dark) with Streamlit's default red accent color underneath
+# the few manually-styled elements (the download button, chart colors) -
+# so two visitors could see two very differently-branded versions of the
+# same app, and the default Streamlit red leaked through on buttons,
+# sliders, and checkboxes. This makes every visitor see one deliberately
+# designed look: white background, navy as the accent color.
+[theme]
+base = "light"
+primaryColor = "#0B2545"
+backgroundColor = "#FFFFFF"
+secondaryBackgroundColor = "#F4F6FA"
+textColor = "#1F2937"
+font = "sans-serif"
+headingFont = "sans-serif"
+baseRadius = "medium"
+borderColor = "#E2E8F0"
+showWidgetBorder = true
+metricValueFontSize = "2rem"
+metricValueFontWeight = 700
+greenColor = "#2E7D32"
+redColor = "#B91C1C"
+
+[theme.sidebar]
+backgroundColor = "#F8FAFC"
+secondaryBackgroundColor = "#FFFFFF"
+borderColor = "#E2E8F0"

@@ -29,6 +29,24 @@ from config import DEFAULT_WACC, DEFAULT_TERMINAL_GROWTH, DEFAULT_SENSITIVITY_WA
 
 st.set_page_config(page_title="AI-Assisted DCF Valuation Tool", layout="wide", page_icon="📈")
 
+# Subtle drop shadow on every bordered container (headline metrics, valuation
+# composition, forecast/sensitivity, etc.) - the white/navy color scheme itself
+# comes from .streamlit/config.toml, which also fixes every visitor seeing a
+# consistent theme regardless of their own light/dark system setting (previously
+# this app inherited whichever theme the visitor's OS was set to). A soft, low-
+# opacity shadow (rather than the heavier one a dark background can carry) is
+# what keeps a white card from just looking outlined against a white page.
+st.markdown(
+    """
+    <style>
+    div[data-testid="stVerticalBlockBorderWrapper"] {
+        box-shadow: 0 2px 8px rgba(15, 23, 42, 0.08);
+    }
+    </style>
+    """,
+    unsafe_allow_html=True,
+)
+
 st.title("AI-Assisted DCF Valuation Tool")
 st.caption(
     "A personal portfolio project. Not investment advice - see the generated workbook's "
@@ -39,6 +57,14 @@ st.caption(
 # Sidebar: all inputs live here
 # ---------------------------------------------------------------
 with st.sidebar:
+    st.markdown(
+        '<div style="display:flex;align-items:center;gap:0.5rem;margin-bottom:1rem;">'
+        '<span style="font-size:1.4rem;line-height:1;">📈</span>'
+        '<span style="font-weight:700;letter-spacing:0.04em;font-size:0.95rem;'
+        'color:#0B2545;">DCF ENGINE</span>'
+        '</div>',
+        unsafe_allow_html=True,
+    )
     st.header("Inputs")
     ticker_query = st.text_input(
         "Ticker or company name", value="MSFT",
@@ -205,7 +231,7 @@ if run_button:
             }
             div[data-testid="stDownloadButton"] button:hover {
                 background-color: #13315C;
-                color: #C9A227;
+                color: #9DBCF2;
             }
             </style>
         """, unsafe_allow_html=True)
