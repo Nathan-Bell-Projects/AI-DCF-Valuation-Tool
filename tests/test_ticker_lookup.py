@@ -50,6 +50,29 @@ def test_resolve_ticker_candidates_empty_query_returns_empty_without_network_cal
 def test_resolve_ticker_candidates_handles_search_failure_gracefully():
     """A network error or bad response must not crash the caller - same
     defensive contract as the rest of this project's data-pulling code."""
-    with patch("yfinance.Search", side_effect=Exception("network error")):
+    with patch("ticker_lookup.time.sleep"), \
+         patch("yfinance.Search", side_effect=Exception("network error")):
         candidates = resolve_ticker_candidates("Microsoft")
     assert candidates == []
+
+
+def test_resolve_ticker_candidates_retries_once_after_transient_failure():
+    """A one-off connection hiccup (common on Yahoo Finance's search
+    endpoint, especially from shared-IP hosting) shouldn't produce a false
+    'no match found' for a real company - one retry should recover it."""
+    mock_search = MagicMock()
+    mock_search.quotes = [{"symbol": "MSFT", "shortname": "Microsoft Corporation"}]
+    with patch("ticker_lookup.time.sleep"), \
+         patch("yfinance.Search", side_effect=[Exception("transient error"), mock_search]):
+        candidates = resolve_ticker_candidates("Microsoft")
+    assert candidates == [{"symbol": "MSFT", "name": "Microsoft Corporation"}]
+
+
+def test_resolve_ticker_candidates_gives_up_after_exhausting_retries():
+    """A persistent failure (not just one-off) should still degrade to an
+    empty list rather than retry forever or raise."""
+    with patch("ticker_lookup.time.sleep"), \
+         patch("yfinance.Search", side_effect=Exception("still down")) as mock_search_cls:
+        candidates = resolve_ticker_candidates("Microsoft")
+    assert candidates == []
+    assert mock_search_cls.call_count == 2  # attempted twice, then gave up

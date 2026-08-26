@@ -12,7 +12,7 @@ These directly encode two real bugs found during manual testing:
 
 import math
 import pandas as pd
-from step2_get_financials import get_dcf_inputs
+from step2_get_financials import get_dcf_inputs, get_current_price_and_shares
 
 
 class _FakeStock:
@@ -100,3 +100,40 @@ def test_all_expected_rows_present(monkeypatch, msft_like_df):
                       "Total Debt", "Current Assets", "Current Liabilities"}
     assert expected_rows.issubset(set(df.index))
     assert not df.loc["Revenue", "2026"] != df.loc["Revenue", "2026"]  # not NaN
+
+
+class TestGetCurrentPriceAndShares:
+    """Regression tests for real lookup failures: 'currentPrice' and
+    'sharesOutstanding' are commonly missing from yfinance's .info for a
+    lot of perfectly valid tickers - most non-US primary listings
+    (Euronext, LSE, etc.), and occasionally a US ticker during a temporary
+    Yahoo Finance API hiccup. Before this fallback existed, a missing
+    'currentPrice' made the app report "couldn't pull required data" for a
+    ticker that was completely valid and had complete financial statements."""
+
+    def test_uses_current_price_when_present(self):
+        info = {"currentPrice": 425.5, "regularMarketPrice": 424.0, "sharesOutstanding": 7_000_000_000}
+        price, shares = get_current_price_and_shares(info)
+        assert price == 425.5
+        assert shares == 7_000_000_000
+
+    def test_falls_back_to_regular_market_price(self):
+        """e.g. a Euronext-listed company like AB InBev (ABI.BR), where
+        yfinance commonly leaves 'currentPrice' unpopulated."""
+        info = {"regularMarketPrice": 58.2, "sharesOutstanding": 1_500_000_000}
+        price, shares = get_current_price_and_shares(info)
+        assert price == 58.2
+        assert shares == 1_500_000_000
+
+    def test_falls_back_to_previous_close_as_last_resort(self):
+        info = {"previousClose": 100.0}
+        price, _ = get_current_price_and_shares(info)
+        assert price == 100.0
+
+    def test_falls_back_to_implied_shares_outstanding(self):
+        info = {"currentPrice": 50.0, "impliedSharesOutstanding": 900_000_000}
+        _, shares = get_current_price_and_shares(info)
+        assert shares == 900_000_000
+
+    def test_missing_everything_returns_none_not_a_crash(self):
+        assert get_current_price_and_shares({}) == (None, None)

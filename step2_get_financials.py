@@ -112,6 +112,33 @@ def check_currency_mismatch(stock_info: dict) -> dict:
     }
 
 
+def get_current_price_and_shares(stock_info: dict) -> tuple:
+    """Pull current share price and shares outstanding from yfinance's
+    `.info` dict, with fallbacks.
+
+    'currentPrice' is really a "real-time US-listed quote" field - it's
+    commonly left unpopulated for a lot of otherwise perfectly valid,
+    liquid tickers (most non-US primary listings such as Euronext or the
+    LSE, and occasionally even a US ticker during a temporary Yahoo
+    Finance API hiccup). Falling back to 'regularMarketPrice' and then
+    'previousClose' means a real ticker with real financial data isn't
+    treated as unsupported just because that one specific field wasn't
+    populated on this particular call.
+
+    Same idea for share count: 'impliedSharesOutstanding' is a reasonable
+    fallback when 'sharesOutstanding' itself is missing."""
+    price = (
+        stock_info.get("currentPrice")
+        or stock_info.get("regularMarketPrice")
+        or stock_info.get("previousClose")
+    )
+    shares = (
+        stock_info.get("sharesOutstanding")
+        or stock_info.get("impliedSharesOutstanding")
+    )
+    return price, shares
+
+
 if __name__ == "__main__":
     ticker = "MSFT"
     print(f"Pulling financial data for {ticker}...\n")

@@ -15,11 +15,21 @@ caller falls back to treating the raw input as a ticker directly.
 """
 
 import re
+import time
 
 # A ticker symbol is short, has no spaces, and is built from letters,
 # digits, dots (e.g. BRK.B) or hyphens - a company name virtually never
 # matches this (it has spaces, or is longer than a handful of characters).
 _TICKER_LIKE = re.compile(r"^[A-Za-z0-9.\-]{1,6}$")
+
+# Yahoo Finance's search endpoint occasionally fails with a transient
+# connection or rate-limit error even for a perfectly normal query - more
+# likely on shared-IP hosting like Streamlit Community Cloud, where many
+# unrelated visitors' traffic can trip Yahoo's rate limiting. One short
+# retry turns a one-off hiccup into a successful lookup instead of a false
+# "no match found" for a real, valid company name.
+_SEARCH_RETRY_ATTEMPTS = 2
+_SEARCH_RETRY_DELAY_SECONDS = 1.5
 
 
 def looks_like_ticker(query: str) -> bool:
@@ -39,11 +49,21 @@ def resolve_ticker_candidates(query: str, max_results: int = 5) -> list:
     if not query:
         return []
 
-    try:
-        from yfinance import Search
-        quotes = Search(query, max_results=max_results).quotes
-    except Exception as e:
-        print(f"  [!] Ticker search failed for '{query}': {e}")
+    from yfinance import Search
+    quotes = None
+    last_error = None
+    for attempt in range(_SEARCH_RETRY_ATTEMPTS):
+        try:
+            quotes = Search(query, max_results=max_results).quotes
+            break
+        except Exception as e:
+            last_error = e
+            if attempt < _SEARCH_RETRY_ATTEMPTS - 1:
+                time.sleep(_SEARCH_RETRY_DELAY_SECONDS)
+
+    if quotes is None:
+        print(f"  [!] Ticker search failed for '{query}' after "
+              f"{_SEARCH_RETRY_ATTEMPTS} attempts: {last_error}")
         return []
 
     candidates = []

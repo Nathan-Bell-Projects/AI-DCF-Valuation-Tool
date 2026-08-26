@@ -17,7 +17,7 @@ import streamlit as st
 import yfinance as yf
 import matplotlib.pyplot as plt
 
-from step2_get_financials import get_dcf_inputs, check_currency_mismatch
+from step2_get_financials import get_dcf_inputs, check_currency_mismatch, get_current_price_and_shares
 from step3_dcf_engine import run_dcf_scenario
 from step4_sensitivity import build_sensitivity_table
 from step5_excel_export import export_to_excel
@@ -86,8 +86,12 @@ with st.sidebar:
             ticker = choice.split(" — ")[0]
         else:
             st.caption(
-                f"No ticker match found for '{ticker_query}' - try typing the "
-                f"ticker symbol directly instead (e.g. MSFT)."
+                f"No ticker match found for '{ticker_query}'. This can happen for "
+                f"non-US companies (Yahoo Finance's search sometimes needs the "
+                f"exchange-listed name, e.g. 'Hermes International' or its ticker "
+                f"'RMS.PA' directly) or during a brief Yahoo Finance hiccup - try "
+                f"again, try adding the country/exchange, or type the ticker "
+                f"symbol directly instead (e.g. MSFT)."
             )
 
     wacc = st.slider("WACC (discount rate)", 0.03, 0.15, DEFAULT_WACC, 0.005, format="%.3f")
@@ -145,12 +149,17 @@ if run_button:
         with st.spinner(f"Pulling financial data for {ticker}..."):
             df = get_dcf_inputs(ticker)
             stock_info = yf.Ticker(ticker).info
-            current_price = stock_info.get("currentPrice")
-            shares_outstanding = stock_info.get("sharesOutstanding")
+            current_price, shares_outstanding = get_current_price_and_shares(stock_info)
             company_name = stock_info.get("longName", ticker)
 
         if current_price is None or shares_outstanding is None:
-            st.error(f"Couldn't pull required data for '{ticker}' - check the ticker is valid.")
+            st.error(
+                f"Couldn't pull a current price and/or share count for '{ticker}' from "
+                f"Yahoo Finance. This is usually a **temporary hiccup on Yahoo's end** "
+                f"rather than a problem with the ticker itself - wait a few seconds and "
+                f"click **Run Analysis** again. If it keeps failing specifically for this "
+                f"ticker, it may not have complete data available through Yahoo Finance."
+            )
             st.stop()
 
         currency_check = check_currency_mismatch(stock_info)
