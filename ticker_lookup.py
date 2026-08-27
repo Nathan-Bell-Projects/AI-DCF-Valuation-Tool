@@ -66,6 +66,20 @@ def looks_like_ticker(query: str) -> bool:
     return bool(_TICKER_LIKE.match(query.strip()))
 
 
+def has_manual_alias(query: str) -> bool:
+    """True if this input matches a known manual override (see
+    _MANUAL_ALIASES above).
+
+    Confirmed real bug: 'LVMH' and 'Hermes' are both short enough (4 and
+    exactly 6 characters) to pass looks_like_ticker() and get treated as a
+    literal ticker symbol - skipping the lookup entirely, even though
+    neither is actually a valid Yahoo Finance symbol (LVMH's real ticker
+    is MC.PA; 'HERMES' isn't a symbol at all). The caller needs to check
+    this BEFORE deciding to skip the lookup based on looks_like_ticker()
+    alone, or these known-good aliases never get a chance to run."""
+    return _normalize(query) in _MANUAL_ALIASES
+
+
 def resolve_ticker_candidates(query: str, max_results: int = 5) -> list:
     """Search Yahoo Finance for tickers matching a company name (or partial
     ticker). Returns a list of {"symbol": ..., "name": ...} dicts, most

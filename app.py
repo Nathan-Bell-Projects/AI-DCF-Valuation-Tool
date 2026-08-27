@@ -27,7 +27,7 @@ from step5_excel_export import export_to_excel
 from analyst_data import get_analyst_data
 from capm_wacc import compute_capm_wacc
 from step6_ai_summary import compute_valuation_rating
-from ticker_lookup import looks_like_ticker, resolve_ticker_candidates
+from ticker_lookup import looks_like_ticker, resolve_ticker_candidates, has_manual_alias
 from config import DEFAULT_WACC, DEFAULT_TERMINAL_GROWTH, DEFAULT_SENSITIVITY_WACC_RANGE, DEFAULT_SENSITIVITY_GROWTH_RANGE
 
 st.set_page_config(page_title="AI-Assisted DCF Valuation Tool", layout="wide", page_icon="📈")
@@ -78,9 +78,15 @@ with st.sidebar:
     # Fast path: input already looks like a ticker (the common case for
     # anyone who already knows what they want to run) - skip the network
     # round-trip entirely and use it exactly as typed, same behavior as
-    # before this lookup existed.
+    # before this lookup existed. EXCEPT when it matches a known manual
+    # alias (see ticker_lookup.py): confirmed real bug where "LVMH" (4
+    # chars) and "Hermes" (exactly 6 chars) both slipped through this
+    # ticker-shaped heuristic and got used as a literal symbol - even
+    # though neither is actually a valid Yahoo Finance ticker - so the
+    # lookup below never even ran for them. Checking the alias table
+    # first means a known-good override always gets its chance.
     ticker = ticker_query.upper()
-    if ticker_query and not looks_like_ticker(ticker_query):
+    if ticker_query and (has_manual_alias(ticker_query) or not looks_like_ticker(ticker_query)):
         with st.spinner(f"Looking up '{ticker_query}'..."):
             candidates = resolve_ticker_candidates(ticker_query)
         if candidates:
@@ -320,6 +326,15 @@ if run_button:
             except Exception:
                 is_dark_theme = True  # sensible fallback matching this app's default palette
             chart_text_color = "white" if is_dark_theme else "#1F2937"
+            # Single blue-to-navy family for every donut on this page, in
+            # place of the previous mixed gold/green/red palette - matches
+            # the app's own brand colors (light blue #5B8DEF, navy #0B2545
+            # are already used elsewhere: charts, buttons, sidebar). For
+            # the analyst recommendations chart specifically, using this
+            # as a light-to-dark SEQUENCE (lightest = Strong Buy, darkest
+            # = Strong Sell) keeps the good-to-bad ordering readable
+            # without needing traffic-light red/green.
+            BLUE_NAVY_SEQUENCE = ["#9DBCF2", "#5B8DEF", "#3A5FA8", "#1D3868", "#0B2545"]
             chart_col1, chart_col2, chart_col3 = st.columns(3)
 
             with chart_col1:
@@ -329,7 +344,7 @@ if run_button:
                 ax1.patch.set_alpha(0)
                 weights = [capm_info["weight_equity"], capm_info["weight_debt"]]
                 labels = [f"Equity ({weights[0]:.0%})", f"Debt ({weights[1]:.0%})"]
-                ax1.pie(weights, labels=labels, colors=["#5B8DEF", "#C9A227"],
+                ax1.pie(weights, labels=labels, colors=["#5B8DEF", "#0B2545"],
                         wedgeprops=dict(width=0.42), startangle=90,
                         textprops={"color": chart_text_color, "fontsize": 9, "weight": "medium"})
                 # Streamlit deprecated passing savefig kwargs (like transparent=True)
@@ -347,7 +362,7 @@ if run_button:
                     categories = ["Strong Buy", "Buy", "Hold", "Sell", "Strong Sell"]
                     keys = ["strongBuy", "buy", "hold", "sell", "strongSell"]
                     counts = [int(latest.get(k, 0)) for k in keys]
-                    colors = ["#2E7D32", "#5B8DEF", "#C9A227", "#B45309", "#B91C1C"]
+                    colors = BLUE_NAVY_SEQUENCE
                     nonzero_labels = [f"{c} ({v})" for c, v in zip(categories, counts) if v > 0]
                     nonzero_counts = [v for v in counts if v > 0]
                     nonzero_colors = [c for c, v in zip(colors, counts) if v > 0]

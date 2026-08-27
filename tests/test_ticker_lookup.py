@@ -3,13 +3,31 @@ Tests for ticker_lookup.py
 """
 
 from unittest.mock import patch, MagicMock
-from ticker_lookup import looks_like_ticker, resolve_ticker_candidates
+from ticker_lookup import looks_like_ticker, resolve_ticker_candidates, has_manual_alias
 
 
 def test_short_alnum_input_looks_like_ticker():
     assert looks_like_ticker("MSFT")
     assert looks_like_ticker("BRK.B")
     assert looks_like_ticker("msft")
+
+
+def test_looks_like_ticker_false_positives_confirmed_real_bug():
+    """Real bug: both 'LVMH' (4 chars) and 'Hermes' (exactly 6 chars, the
+    upper bound of the ticker-shaped regex) pass looks_like_ticker() even
+    though neither is a real Yahoo Finance symbol. This is exactly why the
+    caller (app.py) must also check has_manual_alias() before deciding to
+    skip the search lookup - looks_like_ticker() alone isn't enough."""
+    assert looks_like_ticker("LVMH")
+    assert looks_like_ticker("Hermes")
+
+
+def test_has_manual_alias_catches_known_false_positive_tickers():
+    assert has_manual_alias("LVMH")
+    assert has_manual_alias("Hermes")
+    assert has_manual_alias("  hermès  ")
+    assert not has_manual_alias("MSFT")
+    assert not has_manual_alias("Procter and Gamble")
 
 
 def test_company_name_does_not_look_like_ticker():
@@ -119,6 +137,15 @@ def test_manual_alias_does_not_duplicate_when_search_also_returns_it():
     with patch("yfinance.Search", return_value=mock_search):
         candidates = resolve_ticker_candidates("Hermes")
     assert len([c for c in candidates if c["symbol"] == "RMS.PA"]) == 1
+
+
+def test_manual_alias_resolves_lvmh_by_symbol_lookup_too():
+    """LVMH is the second confirmed real case: 'LVMH' is 4 characters, so
+    it also passes looks_like_ticker() as a false positive, but MC.PA (not
+    'LVMH') is the actual Yahoo Finance symbol."""
+    with patch("yfinance.Search", side_effect=Exception("down")):
+        candidates = resolve_ticker_candidates("LVMH")
+    assert candidates[0] == {"symbol": "MC.PA", "name": "LVMH Moët Hennessy Louis Vuitton"}
 
 
 def test_manual_alias_does_not_apply_to_unrelated_queries():
