@@ -1,58 +1,45 @@
 """
 Price history chart helpers
 ------------------------------------------------------------------
-Pure, testable logic behind the price chart's range selector (1M / 6M /
-YTD / 1Y / 5Y): slicing an already-fetched daily price series down to the
-requested window, and computing the change/color info a Yahoo-Finance-
-style chart header shows (current value, absolute and percent change, and
-whether it's a net gain - which drives the red/green line color).
+Pure, testable logic behind the YTD price chart: computing the change/
+color info a Yahoo-Finance-style chart header shows (current value,
+absolute and percent change, and whether it's a net gain - which drives
+the red/green line color), plus a defensive trim that keeps the chart
+locked to the current calendar year.
 
-Deliberately kept intraday ranges (1D / 5D) OUT of scope. Those need
-minute-level data, which is far less reliable via yfinance's free
-intraday endpoint than the daily closes used here - it can come back
-empty outside market hours, on weekends, or for illiquid/foreign-listed
-tickers, and gets rate-limited more aggressively than daily data. Every
-range below reuses the exact same daily-close data source the rest of
-this app already depends on, so it doesn't introduce a new failure mode.
+This module used to back a 1M/6M/YTD/1Y/5Y range selector in the
+sidebar. That was dropped in favor of a single, fixed YTD view: every
+range change re-ran the whole analysis anyway (Streamlit only applies a
+sidebar input on the next "Run Analysis" click, not instantly like
+Yahoo's own toggle), so the picker added a sidebar control that looked
+like a live toggle but wasn't, without actually saving anything - and an
+instant, session-state-backed version would have meant a much bigger
+change to app.py's structure for a "nice to have" this close to a
+deadline. A single always-YTD view keeps the visual upgrade (colored
+trend line, gradient fill, current value with delta) with nothing to
+toggle and nothing to break, and it's the fastest option to load too:
+app.py asks yfinance for exactly a "ytd" window instead of a full year
+or more of daily data.
 
-app.py fetches ONE 5-year daily history per "Run Analysis" click (cheap,
-one API call) and this module just slices/summarizes it - changing the
-selected range re-runs the whole analysis (same interaction model as
-every other sidebar control, e.g. the WACC slider) rather than updating
-instantly like Yahoo's own chart. That's a deliberate trade: an instant
-in-place toggle needs Streamlit session-state plumbing across the whole
-results section, which is a much bigger change with more surface area
-for something to break - not worth the risk this close to a deadline.
+Intraday ranges (1D / 5D) were never in scope for the same reason they
+still aren't: minute-level data is far less reliable via yfinance's free
+intraday endpoint than the daily closes used here.
 """
 
 import pandas as pd
 
-PERIOD_OPTIONS = ["1M", "6M", "YTD", "1Y", "5Y"]
-DEFAULT_PERIOD = "1Y"
 
-_PERIOD_LOOKBACK_DAYS = {
-    "1M": 30,
-    "6M": 182,
-    "1Y": 365,
-    "5Y": 365 * 5,
-}
-
-
-def filter_history_by_period(history: pd.Series, period: str) -> pd.Series:
-    """Slice a daily price history (DatetimeIndex) down to the requested
-    display window. YTD is calendar-year-to-date; every other range is a
-    fixed lookback in calendar days, measured from the series' own last
-    date (not "today") so this still works correctly on slightly stale
-    data. Unknown periods fall back to a 1-year lookback rather than
-    raising, matching this project's "degrade gracefully" convention."""
+def filter_to_ytd(history: pd.Series) -> pd.Series:
+    """Defensive trim, not the primary mechanism: app.py already asks
+    yfinance for period="ytd" directly, which should return only this
+    calendar year's daily closes. This just guards against yfinance
+    handing back a stray extra row by trimming to the latest date's own
+    calendar year - measured from the series' own last date (not
+    "today"), so it stays correct even on slightly stale data."""
     if history.empty:
         return history
     end = history.index.max()
-    if period == "YTD":
-        start = pd.Timestamp(year=end.year, month=1, day=1, tz=end.tz)
-    else:
-        days = _PERIOD_LOOKBACK_DAYS.get(period, 365)
-        start = end - pd.Timedelta(days=days)
+    start = pd.Timestamp(year=end.year, month=1, day=1, tz=end.tz)
     return history[history.index >= start]
 
 

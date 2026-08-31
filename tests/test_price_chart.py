@@ -1,12 +1,12 @@
 """
-Tests for price_chart.py - the pure logic behind the price chart's range
-selector (1M/6M/YTD/1Y/5Y): slicing a fetched daily history and computing
-the change/color info the chart header shows.
+Tests for price_chart.py - the pure logic behind the YTD price chart:
+a defensive trim to the current calendar year, and computing the
+change/color info the chart header shows.
 """
 
 import pandas as pd
 import pytest
-from price_chart import filter_history_by_period, compute_price_change, PERIOD_OPTIONS, DEFAULT_PERIOD
+from price_chart import filter_to_ytd, compute_price_change
 
 
 def _daily_series(n_days, start="2021-01-01", start_value=100.0, step=1.0):
@@ -17,60 +17,40 @@ def _daily_series(n_days, start="2021-01-01", start_value=100.0, step=1.0):
     return pd.Series(values, index=index)
 
 
-def test_period_options_exclude_intraday():
-    """Deliberate scope decision: no 1D/5D - those need unreliable
-    intraday data. Every option here must be reachable from daily data."""
-    assert "1D" not in PERIOD_OPTIONS
-    assert "5D" not in PERIOD_OPTIONS
-    assert DEFAULT_PERIOD in PERIOD_OPTIONS
-
-
-def test_filter_by_1m_keeps_roughly_last_30_days():
-    history = _daily_series(400)  # a bit over a year of data
-    filtered = filter_history_by_period(history, "1M")
-    span_days = (filtered.index.max() - filtered.index.min()).days
-    assert span_days <= 30
-    assert filtered.index.max() == history.index.max()  # still ends at the latest date
-
-
-def test_filter_by_5y_on_short_history_returns_everything():
-    """A ticker that only has 2 years of history available shouldn't
-    error or return an empty result when asked for '5Y' - it should just
-    return everything it has."""
-    history = _daily_series(730)  # 2 years
-    filtered = filter_history_by_period(history, "5Y")
-    assert len(filtered) == len(history)
-
-
-def test_filter_by_ytd_uses_calendar_year_not_lookback_days():
+def test_filter_to_ytd_uses_calendar_year_not_a_lookback_window():
     history = _daily_series(500, start="2024-06-01")
-    filtered = filter_history_by_period(history, "YTD")
+    filtered = filter_to_ytd(history)
     end_year = history.index.max().year
     assert filtered.index.min().year == end_year
     assert filtered.index.min().month == 1
     assert filtered.index.min().day == 1
+    assert filtered.index.max() == history.index.max()
 
 
-def test_filter_empty_history_returns_empty_without_error():
+def test_filter_to_ytd_empty_history_returns_empty_without_error():
     empty = pd.Series(dtype=float)
-    assert filter_history_by_period(empty, "1Y").empty
+    assert filter_to_ytd(empty).empty
 
 
-def test_filter_unknown_period_falls_back_to_one_year_not_a_crash():
-    history = _daily_series(800)
-    filtered = filter_history_by_period(history, "not-a-real-period")
-    span_days = (filtered.index.max() - filtered.index.min()).days
-    assert 360 <= span_days <= 370
-
-
-def test_filter_handles_timezone_aware_index():
+def test_filter_to_ytd_handles_timezone_aware_index():
     """yfinance's real price history comes back with a tz-aware
     DatetimeIndex (e.g. America/New_York) - a naive/aware comparison
     mismatch would raise, not just give a wrong slice."""
     index = pd.date_range(start="2024-01-01", periods=400, freq="D", tz="America/New_York")
     history = pd.Series(range(400), index=index)
-    filtered = filter_history_by_period(history, "1M")
+    filtered = filter_to_ytd(history)
     assert len(filtered) > 0
+    assert filtered.index.min().year == history.index.max().year
+
+
+def test_filter_to_ytd_drops_a_stray_row_from_the_prior_year():
+    """Defensive case this function exists for: yfinance's own "ytd"
+    fetch should already exclude prior-year rows, but if one slips
+    through, this must still trim it rather than trust the input as-is."""
+    history = _daily_series(40, start="2023-12-20")  # spills into Jan 2024
+    filtered = filter_to_ytd(history)
+    assert filtered.index.min().year == 2024
+    assert (filtered.index < pd.Timestamp("2024-01-01", tz=filtered.index.tz)).sum() == 0
 
 
 def test_compute_price_change_gain():
@@ -103,9 +83,9 @@ def test_compute_price_change_empty_series_does_not_crash():
 
 
 def test_compute_price_change_single_point_does_not_divide_by_zero():
-    """A brand-new listing (or heavily filtered range) might only have one
-    data point - there's no 'change' to compute, but the single price
-    should still be reported for display."""
+    """A brand-new listing (or a YTD window at the very start of January)
+    might only have one data point - there's no "change" to compute, but
+    the single price should still be reported for display."""
     history = _daily_series(1, start_value=42.0)
     result = compute_price_change(history)
     assert result["last"] == 42.0

@@ -30,7 +30,7 @@ from analyst_data import get_analyst_data
 from capm_wacc import compute_capm_wacc
 from step6_ai_summary import compute_valuation_rating
 from ticker_lookup import looks_like_ticker, resolve_ticker_candidates, has_manual_alias
-from price_chart import PERIOD_OPTIONS, DEFAULT_PERIOD, filter_history_by_period, compute_price_change
+from price_chart import filter_to_ytd, compute_price_change
 from config import DEFAULT_WACC, DEFAULT_TERMINAL_GROWTH, DEFAULT_SENSITIVITY_WACC_RANGE, DEFAULT_SENSITIVITY_GROWTH_RANGE
 
 st.set_page_config(page_title="AI-Assisted DCF Valuation Tool", layout="wide", page_icon="📈")
@@ -105,14 +105,6 @@ with st.sidebar:
                 f"again, try adding the country/exchange, or type the ticker "
                 f"symbol directly instead (e.g. MSFT)."
             )
-
-    chart_period = st.selectbox(
-        "Price chart range", PERIOD_OPTIONS, index=PERIOD_OPTIONS.index(DEFAULT_PERIOD),
-        help="Like other inputs here, changing this re-runs the analysis. Intraday "
-             "ranges (1D/5D) aren't offered - Yahoo Finance's free minute-level data "
-             "is too unreliable (gaps outside market hours, foreign/illiquid tickers) "
-             "to depend on for something this visible.",
-    )
 
     wacc = st.slider("WACC (discount rate)", 0.03, 0.15, DEFAULT_WACC, 0.005, format="%.3f")
     terminal_growth = st.slider("Terminal growth rate", 0.0, 0.05, DEFAULT_TERMINAL_GROWTH, 0.0025, format="%.4f")
@@ -333,20 +325,19 @@ if run_button:
 
         with st.spinner("Pulling price history..."):
             try:
-                # One 5-year daily pull covers every range this chart
-                # offers (1M/6M/YTD/1Y/5Y) - filtering down to the
-                # selected range happens locally in price_chart.py, no
-                # extra network call per range. Changing chart_period
-                # re-runs this whole block (same as any other sidebar
-                # input, e.g. the WACC slider) rather than updating
-                # in-place - see price_chart.py's docstring for why that
-                # tradeoff was made deliberately.
-                full_price_history = yf.Ticker(ticker).history(period="5y")["Close"].dropna()
+                # Fixed to year-to-date - see price_chart.py's docstring
+                # for why the earlier 1M/6M/YTD/1Y/5Y range selector was
+                # dropped. "ytd" is also the smallest, fastest window
+                # yfinance offers short of intraday data, so this keeps
+                # every "Run Analysis" click quick regardless.
+                full_price_history = yf.Ticker(ticker).history(period="ytd")["Close"].dropna()
             except Exception:
                 full_price_history = pd.Series(dtype=float)
 
         if len(full_price_history) > 0:
-            chart_history = filter_history_by_period(full_price_history, chart_period)
+            # Defensive trim, not a second fetch: guards against yfinance
+            # handing back a stray extra row outside the calendar year.
+            chart_history = filter_to_ytd(full_price_history)
             change_info = compute_price_change(chart_history)
             if change_info["last"] is not None:
                 is_up = change_info["positive"]
@@ -359,7 +350,7 @@ if run_button:
                     price_label += (
                         f"&nbsp;&nbsp;<span style='color:{line_color}; font-size:1rem;'>"
                         f"{delta_sign}{sym}{abs(change_info['change']):,.2f} "
-                        f"({delta_sign}{abs(change_info['pct_change']):.2%}) · {chart_period}</span>"
+                        f"({delta_sign}{abs(change_info['pct_change']):.2%}) · YTD</span>"
                     )
                 # Streamlit's markdown renderer treats a pair of literal "$"
                 # characters as inline LaTeX (KaTeX) math delimiters, even with
