@@ -148,6 +148,19 @@ def test_manual_alias_resolves_lvmh_by_symbol_lookup_too():
     assert candidates[0] == {"symbol": "MC.PA", "name": "LVMH Moët Hennessy Louis Vuitton"}
 
 
+def test_manual_alias_resolves_tesla_and_nvidia_false_positives():
+    """Confirmed real bug: 'Tesla' (5 chars) and 'Nvidia' (6 chars) both
+    pass looks_like_ticker() as false positives - neither company's real
+    ticker (TSLA, NVDA) matches its own common name. A misspelling
+    ('Nvidea') is covered too, since that's exactly what was reported."""
+    with patch("yfinance.Search", side_effect=Exception("down")):
+        assert resolve_ticker_candidates("Tesla")[0]["symbol"] == "TSLA"
+        assert resolve_ticker_candidates("Nvidia")[0]["symbol"] == "NVDA"
+        assert resolve_ticker_candidates("nvidea")[0]["symbol"] == "NVDA"
+    assert has_manual_alias("Tesla")
+    assert has_manual_alias("NVIDEA")
+
+
 def test_manual_alias_does_not_apply_to_unrelated_queries():
     """The alias table must not shadow a genuine, unrelated live search
     result for anything not explicitly in the list."""

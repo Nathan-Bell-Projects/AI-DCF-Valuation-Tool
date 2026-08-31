@@ -162,6 +162,38 @@ if run_button:
             company_name = stock_info.get("longName", ticker)
 
         if current_price is None or shares_outstanding is None:
+            # Self-healing fallback: the "looks like a ticker, use it as-
+            # is" fast path (looks_like_ticker in ticker_lookup.py) is
+            # what let "MSFT" skip the search round-trip - but plenty of
+            # real company names are ALSO short enough to pass that same
+            # check while not being their own ticker (Tesla -> TSLA, not
+            # "TESLA"; Nvidia -> NVDA, not "NVIDIA"; a misspelling like
+            # "Nvidea" makes this even more likely). Rather than adding
+            # every such name to a manual list one bug report at a time,
+            # if the literal input didn't pull real data, automatically
+            # retry it as a company-name search before giving up - this
+            # covers the general case, not just the specific names
+            # already reported.
+            with st.spinner(f"'{ticker}' didn't return data - trying '{ticker_query}' as a company name..."):
+                fallback_candidates = [
+                    c for c in resolve_ticker_candidates(ticker_query)
+                    if c["symbol"].upper() != ticker
+                ]
+            if fallback_candidates:
+                best = fallback_candidates[0]
+                ticker = best["symbol"]
+                with st.spinner(f"Pulling financial data for {ticker}..."):
+                    df = get_dcf_inputs(ticker)
+                    stock_info = yf.Ticker(ticker).info
+                    current_price, shares_outstanding = get_current_price_and_shares(stock_info)
+                    company_name = stock_info.get("longName", ticker)
+                if current_price is not None and shares_outstanding is not None:
+                    st.info(
+                        f"'{ticker_query}' isn't itself a valid ticker - used "
+                        f"**{ticker}** ({best['name']}) instead."
+                    )
+
+        if current_price is None or shares_outstanding is None:
             st.error(
                 f"Couldn't pull a current price and/or share count for '{ticker}' from "
                 f"Yahoo Finance. This is usually a **temporary hiccup on Yahoo's end** "

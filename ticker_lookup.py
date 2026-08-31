@@ -42,11 +42,24 @@ _SEARCH_RETRY_DELAY_SECONDS = 1.5
 # to try, this is a small manual override, checked first and merged ahead
 # of whatever the live search returns (never instead of it, so a genuine
 # improvement in Yahoo's own search still surfaces additional matches).
+#
+# Also covers a broader, confirmed-real pattern: a company's common name
+# is often short enough to itself pass looks_like_ticker() (<=6 letters,
+# no spaces) while NOT being its actual ticker - "Tesla" (5 letters) is
+# not "TESLA", it's TSLA; "Nvidia" (6 letters) is not "NVIDIA", it's
+# NVDA. app.py now also self-heals this generally (see the fallback in
+# app.py's run_button handler: if the literal input pulls no data, it
+# retries as a company-name search automatically) - these entries are a
+# faster, no-network-round-trip path for the specific names already
+# confirmed to trip this, including a common misspelling.
 _MANUAL_ALIASES = {
     "hermes": ("RMS.PA", "Hermès International"),
     "loreal": ("OR.PA", "L'Oréal S.A."),
     "lvmh": ("MC.PA", "LVMH Moët Hennessy Louis Vuitton"),
     "nestle": ("NESN.SW", "Nestlé S.A."),
+    "tesla": ("TSLA", "Tesla, Inc."),
+    "nvidia": ("NVDA", "NVIDIA Corporation"),
+    "nvidea": ("NVDA", "NVIDIA Corporation"),  # confirmed real misspelling
 }
 
 
