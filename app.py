@@ -13,9 +13,11 @@ Run with: streamlit run app.py
 import os
 import io
 import tempfile
+import pandas as pd
 import streamlit as st
 import yfinance as yf
 import matplotlib.pyplot as plt
+import plotly.graph_objects as go
 
 from step2_get_financials import (
     get_dcf_inputs, check_currency_mismatch, get_current_price_and_shares, currency_symbol,
@@ -28,6 +30,7 @@ from analyst_data import get_analyst_data
 from capm_wacc import compute_capm_wacc
 from step6_ai_summary import compute_valuation_rating
 from ticker_lookup import looks_like_ticker, resolve_ticker_candidates, has_manual_alias
+from price_chart import PERIOD_OPTIONS, DEFAULT_PERIOD, filter_history_by_period, compute_price_change
 from config import DEFAULT_WACC, DEFAULT_TERMINAL_GROWTH, DEFAULT_SENSITIVITY_WACC_RANGE, DEFAULT_SENSITIVITY_GROWTH_RANGE
 
 st.set_page_config(page_title="AI-Assisted DCF Valuation Tool", layout="wide", page_icon="📈")
@@ -102,6 +105,14 @@ with st.sidebar:
                 f"again, try adding the country/exchange, or type the ticker "
                 f"symbol directly instead (e.g. MSFT)."
             )
+
+    chart_period = st.selectbox(
+        "Price chart range", PERIOD_OPTIONS, index=PERIOD_OPTIONS.index(DEFAULT_PERIOD),
+        help="Like other inputs here, changing this re-runs the analysis. Intraday "
+             "ranges (1D/5D) aren't offered - Yahoo Finance's free minute-level data "
+             "is too unreliable (gaps outside market hours, foreign/illiquid tickers) "
+             "to depend on for something this visible.",
+    )
 
     wacc = st.slider("WACC (discount rate)", 0.03, 0.15, DEFAULT_WACC, 0.005, format="%.3f")
     terminal_growth = st.slider("Terminal growth rate", 0.0, 0.05, DEFAULT_TERMINAL_GROWTH, 0.0025, format="%.4f")
@@ -322,15 +333,65 @@ if run_button:
 
         with st.spinner("Pulling price history..."):
             try:
-                price_history = yf.Ticker(ticker).history(period="1y")["Close"]
-                if len(price_history) > 0:
-                    # Resample to weekly - a full year of daily closes crams
-                    # ~250 x-axis labels into the chart, making them
-                    # unreadable. Weekly keeps the trend clear with a clean axis.
-                    price_history_weekly = price_history.resample("W").last()
-                    st.line_chart(price_history_weekly, use_container_width=True, color="#5B8DEF")
+                # One 5-year daily pull covers every range this chart
+                # offers (1M/6M/YTD/1Y/5Y) - filtering down to the
+                # selected range happens locally in price_chart.py, no
+                # extra network call per range. Changing chart_period
+                # re-runs this whole block (same as any other sidebar
+                # input, e.g. the WACC slider) rather than updating
+                # in-place - see price_chart.py's docstring for why that
+                # tradeoff was made deliberately.
+                full_price_history = yf.Ticker(ticker).history(period="5y")["Close"].dropna()
             except Exception:
-                pass  # price history is a nice-to-have, never block the rest of the analysis on it
+                full_price_history = pd.Series(dtype=float)
+
+        if len(full_price_history) > 0:
+            chart_history = filter_history_by_period(full_price_history, chart_period)
+            change_info = compute_price_change(chart_history)
+            if change_info["last"] is not None:
+                is_up = change_info["positive"]
+                line_color = "#2E7D32" if is_up else "#B91C1C"
+                fill_color = "rgba(46, 125, 50, 0.12)" if is_up else "rgba(185, 28, 28, 0.12)"
+
+                price_label = f"{sym}{change_info['last']:,.2f}"
+                if change_info["change"] is not None:
+                    delta_sign = "+" if change_info["change"] >= 0 else "-"
+                    price_label += (
+                        f"&nbsp;&nbsp;<span style='color:{line_color}; font-size:1rem;'>"
+                        f"{delta_sign}{sym}{abs(change_info['change']):,.2f} "
+                        f"({delta_sign}{abs(change_info['pct_change']):.2%}) · {chart_period}</span>"
+                    )
+                # Streamlit's markdown renderer treats a pair of literal "$"
+                # characters as inline LaTeX (KaTeX) math delimiters, even with
+                # unsafe_allow_html=True - a currency symbol like "$" appearing
+                # twice in this string (once in the price, once in the delta)
+                # got swallowed into a failed math-mode parse and rendered as
+                # raw red error text instead of the styled HTML. Escaping every
+                # literal "$" as "\$" opts back out of math mode; harmless for
+                # currencies whose symbol isn't "$" too.
+                st.markdown(f"##### {price_label}".replace("$", "\\$"), unsafe_allow_html=True)
+
+                y_min, y_max = chart_history.min(), chart_history.max()
+                y_pad = (y_max - y_min) * 0.08 or (y_max * 0.05 if y_max else 1)
+
+                price_fig = go.Figure()
+                price_fig.add_trace(go.Scatter(
+                    x=chart_history.index, y=chart_history.values, mode="lines",
+                    line=dict(color=line_color, width=2), fill="tozeroy", fillcolor=fill_color,
+                    hovertemplate=f"%{{x|%b %d, %Y}}<br>{sym}%{{y:,.2f}}<extra></extra>",
+                ))
+                price_fig.update_layout(
+                    margin=dict(l=0, r=0, t=10, b=0), height=320,
+                    plot_bgcolor="rgba(0,0,0,0)", paper_bgcolor="rgba(0,0,0,0)",
+                    hovermode="x unified", font=dict(color="#1F2937"),
+                    xaxis=dict(showgrid=False, fixedrange=True),
+                    yaxis=dict(showgrid=True, gridcolor="#E2E8F0", tickprefix=sym,
+                                fixedrange=True, range=[y_min - y_pad, y_max + y_pad]),
+                )
+                st.plotly_chart(price_fig, use_container_width=True, config={"displayModeBar": False})
+            else:
+                st.caption("Not enough price history in this range to chart.")
+        # else: price history is a nice-to-have, never block the rest of the analysis on it
 
         with st.spinner("Building sensitivity table..."):
             sensitivity_df = build_sensitivity_table(
